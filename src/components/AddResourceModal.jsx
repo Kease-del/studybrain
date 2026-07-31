@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import { X, Upload, FileIcon } from "lucide-react"
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist"
 import mammoth from "mammoth"
 import toast from "react-hot-toast"
 import { chunkText } from "@/services/chunker"
@@ -27,15 +26,20 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024
 
 const PDFJS_VERSION = "6.2.108"
 
-function getPdfWorker() {
-  GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`
-}
-
+let pdfjsPromise = null
 let pdfWorkerInit = false
 
+async function loadPdfJs() {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import("pdfjs-dist")
+  }
+  return pdfjsPromise
+}
+
 async function extractPdfText(arrayBuffer) {
+  const { getDocument, GlobalWorkerOptions } = await loadPdfJs()
   if (!pdfWorkerInit) {
-    getPdfWorker()
+    GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`
     pdfWorkerInit = true
   }
   const pdf = await getDocument({ data: arrayBuffer.slice(0) }).promise
