@@ -1,0 +1,51 @@
+/* ==========================================================================
+   StudyBrain markdown rendering (used by MarkdownContent in the AI chat)
+   These rules live in the Tailwind `components` layer so utility classes
+   applied in MarkdownContent.jsx still win where they overlap. Layer order
+   is pinned in globals.css via: `@layer base, components, utilities;`
+   ========================================================================== */
+
+@layer components {
+  .markdown-body {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---- Tables: soft borders, zebra striping, clean last row ---- */
+  .markdown-body table {
+    border-collapse: collapse;
+  }
+
+  .markdown-body th,
+  .markdown-body td {
+    border-bottom: 1px solid hsl(var(--border) / 0.85);
+  }
+
+  .markdown-body tbody tr:nth-child(odd) {
+    background-color: hsl(var(--muted) / 0.4);
+  }
+
+  .markdown-body tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* ---- Task lists: drop bullets, align checkboxes with the text ---- */
+  .markdown-body ul:has(> li > input[type="checkbox"]),
+  .markdown-body ol:has(> li > input[type="checkbox"]) {
+    list-style: none;
+  }
+
+  .markdown-body li:has(> input[type="checkbox"]) {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  /* ---- Nested lists: compact but still readable ---- */
+  .markdown-body li > ul,
+  .markdown-body li > ol {
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+}
