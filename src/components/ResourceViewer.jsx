@@ -59,27 +59,26 @@ export default function ResourceViewer({ item, onClose }) {
 
       const container = contentNode
       const width = container?.clientWidth || 640
+      const dpr = window.devicePixelRatio || 1
       for (let i = 1; i <= pdf.numPages; i++) {
         if (disposed || cancelledRef.current) return
         const page = await pdf.getPage(i)
         const base = page.getViewport({ scale: 1 })
-        const scale = Math.max(width / base.width, 0.25)
+        const scale = Math.max((width / base.width) * dpr, 0.25 * dpr)
         const viewport = page.getViewport({ scale })
-        const dpr = window.devicePixelRatio || 1
         const canvas = document.createElement("canvas")
-        canvas.width = Math.floor(viewport.width * dpr)
-        canvas.height = Math.floor(viewport.height * dpr)
-        canvas.style.width = `${Math.floor(viewport.width)}px`
-        canvas.style.height = `${Math.floor(viewport.height)}px`
+        canvas.width = Math.floor(viewport.width)
+        canvas.height = Math.floor(viewport.height)
+        canvas.style.width = `${Math.floor(viewport.width / dpr)}px`
+        canvas.style.height = `${Math.floor(viewport.height / dpr)}px`
         canvas.style.display = "block"
         canvas.style.margin = "0 auto 16px auto"
         canvas.style.maxWidth = "100%"
         canvas.style.boxShadow = "0 1px 4px rgba(0,0,0,0.15)"
         container?.appendChild(canvas)
         await page.render({
-          canvas,
+          canvasContext: canvas.getContext("2d"),
           viewport,
-          transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
         }).promise
         if (disposed || cancelledRef.current) return
         setRenderedPages(i)
