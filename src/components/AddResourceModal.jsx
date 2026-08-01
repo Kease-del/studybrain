@@ -4,6 +4,7 @@ import mammoth from "mammoth"
 import toast from "react-hot-toast"
 import { chunkText } from "@/services/chunker"
 import { storeFile, deleteFile as deleteIndexedDBFile } from "@/services/fileStorage"
+import { loadPdfJs, ensurePdfWorker } from "@/services/pdfjs"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -24,24 +25,9 @@ const TYPES = [
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 
-const PDFJS_VERSION = "6.2.108"
-
-let pdfjsPromise = null
-let pdfWorkerInit = false
-
-async function loadPdfJs() {
-  if (!pdfjsPromise) {
-    pdfjsPromise = import("pdfjs-dist")
-  }
-  return pdfjsPromise
-}
-
 async function extractPdfText(arrayBuffer) {
-  const { getDocument, GlobalWorkerOptions } = await loadPdfJs()
-  if (!pdfWorkerInit) {
-    GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`
-    pdfWorkerInit = true
-  }
+  await ensurePdfWorker()
+  const { getDocument } = await loadPdfJs()
   const pdf = await getDocument({ data: arrayBuffer.slice(0) }).promise
   const pages = []
   for (let i = 1; i <= pdf.numPages; i++) {

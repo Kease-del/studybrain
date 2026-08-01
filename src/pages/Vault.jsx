@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import AddResourceModal from "@/components/AddResourceModal"
 import ConfirmDialog from "@/components/ConfirmDialog"
+import ResourceViewer from "@/components/ResourceViewer"
 import EmptyState from "@/components/EmptyState"
 import { SkeletonVaultCard } from "@/components/Skeleton"
 import {
@@ -18,9 +19,8 @@ import {
   PinOff,
 } from "lucide-react"
 import toast from "react-hot-toast"
-import mammoth from "mammoth"
 import { formatRelativeTime } from "@/lib/utils"
-import { getFile, deleteFile } from "@/services/fileStorage"
+import { deleteFile } from "@/services/fileStorage"
 
 const TYPE_FILTERS = [
   { value: "all", label: "All" },
@@ -52,6 +52,7 @@ export default function Vault() {
   const [typeFilter, setTypeFilter] = useState("all")
   const [modalOpen, setModalOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [viewerItem, setViewerItem] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -85,55 +86,6 @@ export default function Vault() {
           return acc
         }, {})
       : null
-
-  async function openFile(item) {
-    const mimeType =
-      item.type === "pdf"
-        ? "application/pdf"
-        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-
-    let fileData = item.fileData
-    if (!fileData) {
-      fileData = await getFile(item.id)
-    }
-    if (!fileData) {
-      toast.error("File not found")
-      return
-    }
-
-    const binary = atob(fileData.split(",")[1])
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-
-    if (mimeType === "application/pdf") {
-      const blob = new Blob([bytes], { type: mimeType })
-      const url = URL.createObjectURL(blob)
-      window.open(url, "_blank")
-      return
-    }
-
-    if (
-      mimeType ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    ) {
-      const result = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer })
-      const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${item.filename || "Document"}</title><style>body{font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6;color:#333}img{max-width:100%}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;text-align:left}</style></head><body>${result.value}</body></html>`
-      const blob = new Blob([html], { type: "text/html" })
-      const url = URL.createObjectURL(blob)
-      window.open(url, "_blank")
-      return
-    }
-
-    const blob = new Blob([bytes], { type: mimeType })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = item.filename || "document"
-    a.click()
-    URL.revokeObjectURL(url)
-  }
 
   async function handleDelete(id) {
     try {
@@ -247,10 +199,10 @@ export default function Vault() {
                 </p>
               )}
               {item.fileData !== undefined || item.type === "pdf" || item.type === "docx" ? (
-                <button
-                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                    onClick={() => openFile(item)}
-                >
+                  <button
+                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    onClick={() => setViewerItem(item)}
+                  >
                   {item.type === "pdf" ? "View PDF" : "View document"}
                   {item.fileSize && (
                     <span className="text-muted-foreground font-normal">
@@ -385,6 +337,13 @@ export default function Vault() {
         onConfirm={() => handleDelete(deleteTarget)}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {viewerItem && (
+        <ResourceViewer
+          item={viewerItem}
+          onClose={() => setViewerItem(null)}
+        />
+      )}
     </div>
   )
 }
