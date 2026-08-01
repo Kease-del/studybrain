@@ -98,7 +98,8 @@ export default function QuickCapture() {
                   {text.length}/{MAX_CHARS}
                 </span>
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">
+              {/* Keyboard-shortcut hint. Hidden on very small screens via .hotkey-hint (responsive.css). */}
+              <p className="hotkey-hint mt-2 text-xs text-muted-foreground">
                 Ctrl + Enter to save · Esc to cancel
               </p>
             </CardContent>

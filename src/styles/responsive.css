@@ -175,3 +175,12 @@
     font-size: 1.5rem;
   }
 }
+
+/* ---- Hide keyboard-shortcut hints (Ctrl+K, Ctrl+Enter) on very small screens ---- */
+/* These hints only make sense on desktop, where users have a physical keyboard.
+   Keep this breakpoint in sync with SMALL_SCREEN in src/hooks/useMediaQuery.js. */
+@media (max-width: 480px) {
+  .hotkey-hint {
+    display: none !important;
+  }
+}

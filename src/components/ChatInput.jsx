@@ -2,10 +2,14 @@ import { useState } from "react"
 import { Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useMediaQuery, SMALL_SCREEN } from "@/hooks/useMediaQuery"
 
 
 export default function ChatInput({ onSend, disabled }) {
   const [text, setText] = useState("")
+  // Drop the "(Enter to send)" hint in the placeholder on very small screens
+  // (same 480px breakpoint as .hotkey-hint in responsive.css).
+  const isSmallScreen = useMediaQuery(SMALL_SCREEN)
 
   function handleSubmit(e) {
     e.preventDefault()
@@ -30,7 +34,9 @@ export default function ChatInput({ onSend, disabled }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Type your message... (Enter to send)"
+        placeholder={
+          isSmallScreen ? "Type your message..." : "Type your message... (Enter to send)"
+        }
         className="flex-1 h-12"
         disabled={disabled}
       />

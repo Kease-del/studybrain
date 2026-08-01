@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { Search, FileText, Database, Link, File, X } from "lucide-react"
 import { useSearch } from "@/context/SearchContext"
 import { highlightText } from "@/lib/highlight"
+import { useMediaQuery, SMALL_SCREEN } from "@/hooks/useMediaQuery"
 
 const CATEGORY_ICONS = {
   Notes: FileText,
@@ -16,6 +17,9 @@ export default function SearchBar() {
   const navigate = useNavigate()
   const inputRef = useRef(null)
   const containerRef = useRef(null)
+  // Drop the "(Ctrl+K)" hint in the placeholder on very small screens
+  // (same 480px breakpoint as .hotkey-hint in responsive.css).
+  const isSmallScreen = useMediaQuery(SMALL_SCREEN)
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -72,7 +76,7 @@ export default function SearchBar() {
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
-          placeholder="Search... (Ctrl+K)"
+          placeholder={isSmallScreen ? "Search..." : "Search... (Ctrl+K)"}
           className="w-full rounded-lg border bg-background pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition"
           aria-label="Search notes and resources"
           role="searchbox"
