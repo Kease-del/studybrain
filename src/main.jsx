@@ -11,6 +11,9 @@ import App from "@/App"
 import "@/styles/globals.css"
 import { Toaster } from "react-hot-toast"
 import ErrorBoundary from "@/components/ErrorBoundary"
+import { verifySupabaseConnection } from "@/lib/supabase"
+
+verifySupabaseConnection()
 
 createRoot(document.getElementById("root")).render(
   <ErrorBoundary>
