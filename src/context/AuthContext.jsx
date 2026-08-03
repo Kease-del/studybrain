@@ -10,6 +10,7 @@ const mapSupabaseUser = (sbUser) => {
   if (!sbUser) return null
   const metadata = sbUser.user_metadata || {}
   return {
+    id: sbUser.id,
     name:
       metadata.name ||
       metadata.full_name ||

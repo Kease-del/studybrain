@@ -1,76 +1,114 @@
 import { createContext, useState, useCallback, useEffect } from "react"
 import { useAuth } from "@/hooks/useAuth"
-
-const OLD_KEY = "studybrain_notes"
+import { getNotesProvider } from "@/services/notes"
 
 export const NotesContext = createContext(null)
 
 export function NotesProvider({ children }) {
   const { user } = useAuth()
-  const userKey = user ? `${OLD_KEY}_${user.email}` : null
+  const provider = getNotesProvider()
   const [notes, setNotes] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const reload = useCallback(async () => {
+    if (!user) return
+    try {
+      const stored = await provider.fetchNotes(user)
+      setNotes(stored)
+      setError(null)
+    } catch (err) {
+      console.error("Failed to reload notes:", err.message)
+      setError(err.message)
+    }
+  }, [user, provider])
 
   useEffect(() => {
-    if (!userKey) {
-      setNotes([])
-      return
-    }
+    let active = true
 
-    const oldData = localStorage.getItem(OLD_KEY)
-    const userData = localStorage.getItem(userKey)
-
-    if (oldData && !userData) {
-      localStorage.setItem(userKey, oldData)
-      localStorage.removeItem(OLD_KEY)
-    }
-
-    const stored = localStorage.getItem(userKey)
-    setNotes(stored ? JSON.parse(stored) : [])
-  }, [userKey])
-
-  const sync = useCallback(
-    (updated) => {
-      setNotes(updated)
-      if (userKey) {
-        localStorage.setItem(userKey, JSON.stringify(updated))
+    const load = async () => {
+      try {
+        const stored = user ? await provider.fetchNotes(user) : []
+        if (!active) return
+        setNotes(stored)
+        setError(null)
+      } catch (err) {
+        if (!active) return
+        console.error("Failed to load notes:", err.message)
+        setNotes([])
+        setError(err.message)
+      } finally {
+        if (active) setLoading(false)
       }
-    },
-    [userKey]
-  )
+    }
+
+    load()
+
+    return () => {
+      active = false
+    }
+  }, [user, provider])
 
   const addNote = useCallback(
-    (text) => {
+    async (text) => {
+      if (!user) return
       const newNote = {
         id: crypto.randomUUID(),
         text,
         createdAt: new Date().toISOString(),
       }
-      sync([newNote, ...notes])
+      setNotes((prev) => [newNote, ...prev])
+      try {
+        await provider.addNote(user, newNote)
+        setError(null)
+      } catch (err) {
+        setNotes((prev) => prev.filter((note) => note.id !== newNote.id))
+        await reload()
+        setError(err.message)
+      }
     },
-    [notes, sync]
+    [user, provider, reload]
   )
 
   const deleteNote = useCallback(
-    (id) => {
-      sync(notes.filter((note) => note.id !== id))
+    async (id) => {
+      if (!user) return
+      setNotes((prev) => prev.filter((note) => note.id !== id))
+      try {
+        await provider.deleteNote(user, id)
+        setError(null)
+      } catch (err) {
+        await reload()
+        setError(err.message)
+      }
     },
-    [notes, sync]
+    [user, provider, reload]
   )
 
   const editNote = useCallback(
-    (id, newText) => {
-      sync(
-        notes.map((note) =>
+    async (id, newText) => {
+      if (!user) return
+      const previous = notes.find((note) => note.id === id)
+      if (!previous) return
+      setNotes((prev) =>
+        prev.map((note) =>
           note.id === id ? { ...note, text: newText } : note
         )
       )
+      try {
+        await provider.updateNote(user, { ...previous, text: newText })
+        setError(null)
+      } catch (err) {
+        await reload()
+        setError(err.message)
+      }
     },
-    [notes, sync]
+    [user, provider, notes, reload]
   )
 
   return (
     <NotesContext.Provider
-      value={{ notes, addNote, deleteNote, editNote }}
+      value={{ notes, addNote, deleteNote, editNote, loading, error }}
     >
       {children}
     </NotesContext.Provider>
