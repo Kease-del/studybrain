@@ -1,56 +1,57 @@
 import { createContext, useState, useCallback, useEffect } from "react"
 import { useAuth } from "@/hooks/useAuth"
-
-const OLD_KEY = "studybrain_vault"
+import { getVaultProvider } from "@/services/vault"
 
 export const VaultContext = createContext(null)
 
 export function VaultProvider({ children }) {
   const { user } = useAuth()
-  const userKey = user ? `${OLD_KEY}_${user.email}` : null
+  const provider = getVaultProvider()
   const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const reload = useCallback(async () => {
+    if (!user) return
+    try {
+      const stored = await provider.fetchItems(user)
+      setItems(stored)
+      setError(null)
+    } catch (err) {
+      console.error("Failed to reload vault:", err.message)
+      setError(err.message)
+    }
+  }, [user, provider])
 
   useEffect(() => {
-    if (!userKey) {
-      setItems([])
-      return
-    }
+    let active = true
 
-    const oldData = localStorage.getItem(OLD_KEY)
-    const userData = localStorage.getItem(userKey)
-
-    if (oldData && !userData) {
-      const migrated = JSON.parse(oldData).map((item) => ({
-        tags: [],
-        pinned: false,
-        ...item,
-      }))
-      localStorage.setItem(userKey, JSON.stringify(migrated))
-      localStorage.removeItem(OLD_KEY)
-    }
-
-    const stored = localStorage.getItem(userKey)
-    const parsed = stored ? JSON.parse(stored) : []
-    const migrated = parsed.map((item) => ({
-      tags: [],
-      pinned: false,
-      ...item,
-    }))
-    setItems(migrated)
-  }, [userKey])
-
-  const sync = useCallback(
-    (updated) => {
-      if (userKey) {
-        localStorage.setItem(userKey, JSON.stringify(updated))
+    const load = async () => {
+      try {
+        const stored = user ? await provider.fetchItems(user) : []
+        if (!active) return
+        setItems(stored)
+        setError(null)
+      } catch (err) {
+        if (!active) return
+        console.error("Failed to load vault:", err.message)
+        setItems([])
+        setError(err.message)
+      } finally {
+        if (active) setLoading(false)
       }
-      setItems(updated)
-    },
-    [userKey]
-  )
+    }
+
+    load()
+
+    return () => {
+      active = false
+    }
+  }, [user, provider])
 
   const addItem = useCallback(
-    (data) => {
+    async (data) => {
+      if (!user) return
       const newItem = {
         id: crypto.randomUUID(),
         tags: [],
@@ -58,43 +59,77 @@ export function VaultProvider({ children }) {
         ...data,
         createdAt: new Date().toISOString(),
       }
-      sync([newItem, ...items])
+      setItems((prev) => [newItem, ...prev])
+      try {
+        await provider.addItem(user, newItem)
+        setError(null)
+      } catch (err) {
+        setItems((prev) => prev.filter((item) => item.id !== newItem.id))
+        await reload()
+        setError(err.message)
+      }
     },
-    [items, sync]
+    [user, provider, reload]
   )
 
   const deleteItem = useCallback(
-    (id) => {
-      sync(items.filter((item) => item.id !== id))
+    async (id) => {
+      if (!user) return
+      setItems((prev) => prev.filter((item) => item.id !== id))
+      try {
+        await provider.deleteItem(user, id)
+        setError(null)
+      } catch (err) {
+        await reload()
+        setError(err.message)
+      }
     },
-    [items, sync]
+    [user, provider, reload]
   )
 
   const editItem = useCallback(
-    (id, updates) => {
-      sync(
-        items.map((item) =>
-          item.id === id ? { ...item, ...updates } : item
-        )
+    async (id, updates) => {
+      if (!user) return
+      const previous = items.find((item) => item.id === id)
+      if (!previous) return
+      const updated = { ...previous, ...updates }
+      setItems((prev) =>
+        prev.map((item) => (item.id === id ? updated : item))
       )
+      try {
+        await provider.updateItem(user, updated)
+        setError(null)
+      } catch (err) {
+        await reload()
+        setError(err.message)
+      }
     },
-    [items, sync]
+    [user, provider, items, reload]
   )
 
   const togglePin = useCallback(
-    (id) => {
-      sync(
-        items.map((item) =>
-          item.id === id ? { ...item, pinned: !item.pinned } : item
-        )
+    async (id) => {
+      if (!user) return
+      const previous = items.find((item) => item.id === id)
+      if (!previous) return
+      const updated = { ...previous, pinned: !previous.pinned }
+      setItems((prev) =>
+        prev.map((item) => (item.id === id ? updated : item))
       )
+      try {
+        await provider.updateItem(user, updated)
+        setError(null)
+      } catch (err) {
+        await reload()
+        setError(err.message)
+      }
     },
-    [items, sync]
+    [user, provider, items, reload]
   )
 
   return (
     <VaultContext.Provider
-      value={{ items, addItem, deleteItem, editItem, togglePin }}
+      value={{ items, addItem, deleteItem, editItem, togglePin, loading, error }}
     >
       {children}
     </VaultContext.Provider>
