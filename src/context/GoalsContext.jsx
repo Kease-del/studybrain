@@ -1,37 +1,57 @@
 import { createContext, useState, useCallback, useEffect } from "react"
 import { useAuth } from "@/hooks/useAuth"
-
-const STORAGE_KEY = "studybrain_goals"
+import { getGoalsProvider } from "@/services/goals"
 
 export const GoalsContext = createContext(null)
 
 export function GoalsProvider({ children }) {
   const { user } = useAuth()
-  const userKey = user ? `${STORAGE_KEY}_${user.email}` : null
+  const provider = getGoalsProvider()
   const [goals, setGoals] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const reload = useCallback(async () => {
+    if (!user) return
+    try {
+      const stored = await provider.fetchGoals(user)
+      setGoals(stored)
+      setError(null)
+    } catch (err) {
+      console.error("Failed to reload goals:", err.message)
+      setError(err.message)
+    }
+  }, [user, provider])
 
   useEffect(() => {
-    if (!userKey) {
-      setGoals([])
-      return
+    let active = true
+
+    const load = async () => {
+      try {
+        const stored = user ? await provider.fetchGoals(user) : []
+        if (!active) return
+        setGoals(stored)
+        setError(null)
+      } catch (err) {
+        if (!active) return
+        console.error("Failed to load goals:", err.message)
+        setGoals([])
+        setError(err.message)
+      } finally {
+        if (active) setLoading(false)
+      }
     }
 
-    const stored = localStorage.getItem(userKey)
-    setGoals(stored ? JSON.parse(stored) : [])
-  }, [userKey])
+    load()
 
-  const sync = useCallback(
-    (updated) => {
-      setGoals(updated)
-      if (userKey) {
-        localStorage.setItem(userKey, JSON.stringify(updated))
-      }
-    },
-    [userKey]
-  )
+    return () => {
+      active = false
+    }
+  }, [user, provider])
 
   const addGoal = useCallback(
-    (title, description, targetDate) => {
+    async (title, description, targetDate) => {
+      if (!user) return
       const newGoal = {
         id: crypto.randomUUID(),
         title,
@@ -40,36 +60,77 @@ export function GoalsProvider({ children }) {
         completed: false,
         createdAt: new Date().toISOString(),
       }
-      sync([newGoal, ...goals])
+      setGoals((prev) => [newGoal, ...prev])
+      try {
+        await provider.addGoal(user, newGoal)
+        setError(null)
+      } catch (err) {
+        setGoals((prev) => prev.filter((goal) => goal.id !== newGoal.id))
+        await reload()
+        setError(err.message)
+      }
     },
-    [goals, sync]
+    [user, provider, reload]
   )
 
   const deleteGoal = useCallback(
-    (id) => {
-      sync(goals.filter((goal) => goal.id !== id))
+    async (id) => {
+      if (!user) return
+      setGoals((prev) => prev.filter((goal) => goal.id !== id))
+      try {
+        await provider.deleteGoal(user, id)
+        setError(null)
+      } catch (err) {
+        await reload()
+        setError(err.message)
+      }
     },
-    [goals, sync]
+    [user, provider, reload]
   )
 
   const toggleGoalCompletion = useCallback(
-    (id) => {
-      sync(
-        goals.map((goal) =>
-          goal.id === id ? { ...goal, completed: !goal.completed } : goal
-        )
+    async (id) => {
+      if (!user) return
+      const previous = goals.find((goal) => goal.id === id)
+      if (!previous) return
+      const updated = { ...previous, completed: !previous.completed }
+      setGoals((prev) =>
+        prev.map((goal) => (goal.id === id ? updated : goal))
       )
+      try {
+        await provider.updateGoal(user, updated)
+        setError(null)
+      } catch (err) {
+        await reload()
+        setError(err.message)
+      }
     },
-    [goals, sync]
+    [user, provider, goals, reload]
   )
 
-  const clearGoals = useCallback(() => {
-    sync([])
-  }, [sync])
+  const clearGoals = useCallback(async () => {
+    if (!user) return
+    setGoals([])
+    try {
+      await provider.clearGoals(user)
+      setError(null)
+    } catch (err) {
+      await reload()
+      setError(err.message)
+    }
+  }, [user, provider, reload])
 
   return (
     <GoalsContext.Provider
-      value={{ goals, addGoal, deleteGoal, toggleGoalCompletion, clearGoals }}
+      value={{
+        goals,
+        addGoal,
+        deleteGoal,
+        toggleGoalCompletion,
+        clearGoals,
+        loading,
+        error,
+      }}
     >
       {children}
     </GoalsContext.Provider>
