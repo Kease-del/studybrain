@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import { getSupabase } from "@/lib/supabase"
+import { ensureProfile } from "@/services/profile"
 
 export const AuthContext = createContext()
 
@@ -49,15 +50,27 @@ export function AuthProvider({ children }) {
     let active = true
     let subscription = null
 
+    const ensureProfileIfNeeded = (mapped) => {
+      if (mapped) {
+        ensureProfile(mapped).catch((err) =>
+          console.error("Failed to create profile:", err.message)
+        )
+      }
+    }
+
     const init = async () => {
       const supabase = getSupabase()
       const { data } = await supabase.auth.getSession()
       subscription = supabase.auth.onAuthStateChange((_event, session) => {
         if (!active) return
-        setUser(mapSupabaseUser(session?.user))
+        const mapped = mapSupabaseUser(session?.user)
+        setUser(mapped)
+        ensureProfileIfNeeded(mapped)
       })
       if (!active) return
-      setUser(mapSupabaseUser(data.session?.user))
+      const mapped = mapSupabaseUser(data.session?.user)
+      setUser(mapped)
+      ensureProfileIfNeeded(mapped)
       setLoading(false)
     }
 
@@ -116,7 +129,13 @@ export function AuthProvider({ children }) {
       }
 
       if (data?.session) {
-        setUser(mapSupabaseUser(data.user))
+        const mapped = mapSupabaseUser(data.user)
+        try {
+          await ensureProfile(mapped)
+        } catch (err) {
+          console.error("Failed to create profile:", err.message)
+        }
+        setUser(mapped)
       }
 
       return { success: true }
@@ -156,7 +175,13 @@ export function AuthProvider({ children }) {
         return { error: error.message }
       }
 
-      setUser(mapSupabaseUser(data.user))
+      const mapped = mapSupabaseUser(data.user)
+      try {
+        await ensureProfile(mapped)
+      } catch (err) {
+        console.error("Failed to create profile:", err.message)
+      }
+      setUser(mapped)
       return { success: true }
     } catch (err) {
       return { error: err.message || "Login failed" }
