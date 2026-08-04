@@ -1,6 +1,8 @@
 import { getSupabase } from "@/lib/supabase"
 
 const TABLE = "vault_items"
+const STORAGE_BUCKET = "vault-files"
+const SIGNED_URL_TTL = 3600
 
 const requireUserId = (user) => {
   if (!user?.id) {
@@ -22,6 +24,7 @@ const mapRow = (row) => ({
   chunks: row.chunks ?? [],
   tags: row.tags ?? [],
   pinned: row.pinned ?? false,
+  storagePath: row.storage_path ?? undefined,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -33,7 +36,7 @@ export const supabaseVaultProvider = {
     const { data, error } = await supabase
       .from(TABLE)
       .select(
-        "id, type, title, url, filename, file_size, content, chunks, tags, pinned, created_at, updated_at"
+        "id, type, title, url, filename, file_size, content, chunks, tags, pinned, storage_path, created_at, updated_at"
       )
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
@@ -56,6 +59,7 @@ export const supabaseVaultProvider = {
       chunks: item.chunks ?? [],
       tags: item.tags ?? [],
       pinned: item.pinned ?? false,
+      storage_path: item.storagePath ?? null,
       created_at: item.createdAt,
       updated_at: item.createdAt,
     })
@@ -65,20 +69,24 @@ export const supabaseVaultProvider = {
   async updateItem(user, item) {
     requireUserId(user)
     const supabase = getSupabase()
+    const updates = {
+      type: item.type,
+      title: item.title,
+      url: item.url || null,
+      filename: item.filename || null,
+      file_size: item.fileSize ?? null,
+      content: item.content ?? null,
+      chunks: item.chunks ?? [],
+      tags: item.tags ?? [],
+      pinned: item.pinned ?? false,
+      updated_at: new Date().toISOString(),
+    }
+    if (item.storagePath !== undefined) {
+      updates.storage_path = item.storagePath
+    }
     const { error } = await supabase
       .from(TABLE)
-      .update({
-        type: item.type,
-        title: item.title,
-        url: item.url || null,
-        filename: item.filename || null,
-        file_size: item.fileSize ?? null,
-        content: item.content ?? null,
-        chunks: item.chunks ?? [],
-        tags: item.tags ?? [],
-        pinned: item.pinned ?? false,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updates)
       .eq("id", item.id)
     if (error) throw new Error(error.message)
   },
@@ -87,6 +95,38 @@ export const supabaseVaultProvider = {
     requireUserId(user)
     const supabase = getSupabase()
     const { error } = await supabase.from(TABLE).delete().eq("id", itemId)
+    if (error) throw new Error(error.message)
+  },
+
+  async uploadFile(user, vaultItemId, file) {
+    const userId = requireUserId(user)
+    const supabase = getSupabase()
+    const storagePath = `${userId}/${vaultItemId}/${file.name}`
+    const { error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(storagePath, file, { upsert: true })
+    if (error) throw new Error(error.message)
+    return storagePath
+  },
+
+  async downloadFile(user, storagePath) {
+    requireUserId(user)
+    const supabase = getSupabase()
+    const { data, error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .createSignedUrl(storagePath, SIGNED_URL_TTL)
+    if (error) throw new Error(error.message)
+    const res = await fetch(data.signedUrl)
+    if (!res.ok) throw new Error(`Failed to download file (${res.status})`)
+    return res.blob()
+  },
+
+  async deleteFile(user, storagePath) {
+    requireUserId(user)
+    const supabase = getSupabase()
+    const { error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .remove([storagePath])
     if (error) throw new Error(error.message)
   },
 }
