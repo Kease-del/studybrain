@@ -27,6 +27,7 @@ export default function ResourceViewer({ item, onClose }) {
   const contentRef = useRef(null)
   const cancelledRef = useRef(false)
   const pdfRef = useRef(null)
+  const canvasRef = useRef([])
 
   useEffect(() => {
     let disposed = false
@@ -76,6 +77,7 @@ export default function ResourceViewer({ item, onClose }) {
         const scale = Math.max((width / base.width) * dpr, 0.25 * dpr)
         const viewport = page.getViewport({ scale })
         const canvas = document.createElement("canvas")
+        canvasRef.current.push(canvas)
         canvas.width = Math.floor(viewport.width)
         canvas.height = Math.floor(viewport.height)
         canvas.style.width = `${Math.floor(viewport.width / dpr)}px`
@@ -123,7 +125,8 @@ export default function ResourceViewer({ item, onClose }) {
         pdfRef.current.destroy().catch(() => {})
         pdfRef.current = null
       }
-      if (contentNode) contentNode.innerHTML = ""
+      canvasRef.current.forEach((canvas) => canvas.remove())
+      canvasRef.current = []
     }
   }, [item, user])
 

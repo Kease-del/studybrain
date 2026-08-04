@@ -179,16 +179,16 @@ export default function AddResourceModal({ isOpen, onClose }) {
         resetAndClose()
         toast.success("Resource added")
       } catch (err) {
-        if (storagePath) {
-          provider.deleteFile(user, storagePath).catch(() => {})
-        } else if (vaultItemId) {
-          deleteIndexedDBFile(vaultItemId).catch(() => {})
+        if (vaultItemId) {
+          if (canUpload && storagePath) {
+            await provider.deleteFile(user, storagePath).catch(() => {})
+          } else if (!canUpload) {
+            await deleteIndexedDBFile(vaultItemId).catch(() => {})
+          }
         }
-        if (err instanceof Error && (err.name === "QuotaExceededError" || err.name === "NS_ERROR_DOM_QUOTA_REACHED")) {
-          toast.error("Storage full. Please delete some items and try again.")
-        } else {
-          toast.error("Failed to process file.")
-        }
+
+        console.error(err)
+        toast.error(err.message)
         setSaving(false)
       }
 
