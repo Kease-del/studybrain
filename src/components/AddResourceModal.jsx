@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useVault } from "@/hooks/useVault"
+import { useAuth } from "@/hooks/useAuth"
+import { getVaultProvider } from "@/services/vault"
 
 const TYPES = [
   { value: "text", label: "Text" },
@@ -47,6 +49,7 @@ async function extractDocxText(arrayBuffer) {
 
 export default function AddResourceModal({ isOpen, onClose }) {
   const { addItem } = useVault()
+  const { user } = useAuth()
   const fileInputRef = useRef(null)
   const [type, setType] = useState("text")
   const [title, setTitle] = useState("")
@@ -128,7 +131,10 @@ export default function AddResourceModal({ isOpen, onClose }) {
 
       setSaving(true)
 
-      let resourceId
+      const provider = getVaultProvider()
+      const canUpload = typeof provider.uploadFile === "function"
+      let vaultItemId
+      let storagePath
 
       try {
         const arrayBuffer = await selectedFile.arrayBuffer()
@@ -147,13 +153,17 @@ export default function AddResourceModal({ isOpen, onClose }) {
           toast.error("Text extraction failed.")
         }
 
-        const fileData = arrayBufferToDataUrl(arrayBuffer, selectedFile.type)
+        vaultItemId = crypto.randomUUID()
 
-        resourceId = crypto.randomUUID()
-        await storeFile(resourceId, fileData)
+        if (canUpload) {
+          storagePath = await provider.uploadFile(user, vaultItemId, selectedFile)
+        } else {
+          const fileData = arrayBufferToDataUrl(arrayBuffer, selectedFile.type)
+          await storeFile(vaultItemId, fileData)
+        }
 
         const payload = {
-          id: resourceId,
+          id: vaultItemId,
           type,
           title: title.trim(),
           filename: selectedFile.name,
@@ -161,6 +171,7 @@ export default function AddResourceModal({ isOpen, onClose }) {
           content: extractedText,
           chunks: chunkText(extractedText, pages),
           tags: parseTags(tagsStr),
+          ...(storagePath ? { storagePath } : {}),
         }
 
         addItem(payload)
@@ -168,7 +179,11 @@ export default function AddResourceModal({ isOpen, onClose }) {
         resetAndClose()
         toast.success("Resource added")
       } catch (err) {
-        if (resourceId) deleteIndexedDBFile(resourceId).catch(() => {})
+        if (storagePath) {
+          provider.deleteFile(user, storagePath).catch(() => {})
+        } else if (vaultItemId) {
+          deleteIndexedDBFile(vaultItemId).catch(() => {})
+        }
         if (err instanceof Error && (err.name === "QuotaExceededError" || err.name === "NS_ERROR_DOM_QUOTA_REACHED")) {
           toast.error("Storage full. Please delete some items and try again.")
         } else {

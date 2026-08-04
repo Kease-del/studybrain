@@ -9,6 +9,8 @@ import {
 } from "@/components/ui/card"
 import mammoth from "mammoth"
 import { getFile } from "@/services/fileStorage"
+import { getVaultProvider } from "@/services/vault"
+import { useAuth } from "@/hooks/useAuth"
 import { loadPdfJs, ensurePdfWorker } from "@/services/pdfjs"
 
 function buildDocxHtml(value, filename) {
@@ -16,6 +18,7 @@ function buildDocxHtml(value, filename) {
 }
 
 export default function ResourceViewer({ item, onClose }) {
+  const { user } = useAuth()
   const [status, setStatus] = useState("loading")
   const [error, setError] = useState("")
   const [numPages, setNumPages] = useState(0)
@@ -31,6 +34,12 @@ export default function ResourceViewer({ item, onClose }) {
     const contentNode = contentRef.current
 
     async function getBytes() {
+      if (item.storagePath) {
+        const provider = getVaultProvider()
+        const blob = await provider.downloadFile(user, item.storagePath)
+        const arrayBuffer = await blob.arrayBuffer()
+        return new Uint8Array(arrayBuffer)
+      }
       let fileData = item.fileData
       if (!fileData) {
         fileData = await getFile(item.id)
@@ -116,7 +125,7 @@ export default function ResourceViewer({ item, onClose }) {
       }
       if (contentNode) contentNode.innerHTML = ""
     }
-  }, [item])
+  }, [item, user])
 
   const handleKeyDown = useCallback(
     (e) => {
