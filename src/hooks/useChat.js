@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { sendChatMessage, getContentBudgetForMessages } from "@/services/ai"
 import { trackChatMessage, resetChatSession, migrateChatSessions } from "@/services/analytics"
 import { retrieveRelevantKnowledge, extractPageRefs } from "@/services/retriever"
@@ -8,74 +8,176 @@ import { isAskingAboutKnowledge, getKnowledgeDomain } from "@/services/queryInte
 import { useAuth } from "./useAuth"
 import { useNotes } from "./useNotes"
 import { useVault } from "./useVault"
-
-const OLD_CHAT_KEY = "studybrain_chat"
+import { getChatProvider } from "@/services/chat"
 
 const NO_KNOWLEDGE_PREFIX =
   "I couldn't find anything about that in your saved notes or resources."
+
+const ACTIVE_SESSION_KEY = (email) => `studybrain_chat_active_session_${email}`
+
+function migrateLegacyMessages(email, sessionId, provider) {
+  const legacy = localStorage.getItem(`studybrain_chat_${email}`) ?? localStorage.getItem("studybrain_chat")
+  let messages = []
+  if (legacy !== null) {
+    try {
+      const parsed = JSON.parse(legacy)
+      if (Array.isArray(parsed)) messages = parsed
+    } catch {
+      messages = []
+    }
+  }
+  provider.saveMessages(email, sessionId, messages)
+  localStorage.removeItem(`studybrain_chat_${email}`)
+  localStorage.removeItem("studybrain_chat")
+}
 
 export function useChat() {
   const { notes } = useNotes()
   const { items: vaultItems } = useVault()
   const { user } = useAuth()
-  const chatKey = user ? `${OLD_CHAT_KEY}_${user.email}` : null
+  const email = user?.email
+  const provider = getChatProvider()
+
+  const [sessions, setSessions] = useState([])
+  const [activeSessionId, setActiveSessionId] = useState(null)
   const [messages, setMessages] = useState([])
   const [isTyping, setIsTyping] = useState(false)
 
+  const activeSessionIdRef = useRef(null)
   useEffect(() => {
-    migrateChatSessions(user?.email)
-  }, [user?.email])
+    activeSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
 
   useEffect(() => {
-    if (!chatKey) {
+    migrateChatSessions(email)
+  }, [email])
+
+  useEffect(() => {
+    if (!email) {
+      setSessions([])
+      setActiveSessionId(null)
       setMessages([])
       return
     }
-    const oldData = localStorage.getItem(OLD_CHAT_KEY)
-    const userData = localStorage.getItem(chatKey)
-    if (oldData && !userData) {
-      localStorage.setItem(chatKey, oldData)
-      localStorage.removeItem(OLD_CHAT_KEY)
-    }
-    const stored = localStorage.getItem(chatKey)
-    setMessages(stored ? JSON.parse(stored) : [])
-  }, [chatKey])
+    let disposed = false
+    function bootstrap() {
+      let list = provider.getSessions(email)
 
-  const sync = useCallback((msgs) => {
-    setMessages(msgs)
-    if (chatKey) {
-      localStorage.setItem(chatKey, JSON.stringify(msgs))
-    }
-  }, [chatKey])
-
-  const addMessage = useCallback((content, role, metadata) => {
-    const msg = {
-      id: crypto.randomUUID(),
-      role,
-      content,
-      ...(metadata ? { metadata } : {}),
-      createdAt: new Date().toISOString(),
-    }
-
-    setMessages((prev) => {
-      const updated = [...prev, msg]
-      if (chatKey) {
-        localStorage.setItem(chatKey, JSON.stringify(updated))
+      if (list.length === 0) {
+        const session = provider.createSession(email, "New Chat")
+        migrateLegacyMessages(email, session.id, provider)
+        list = provider.getSessions(email)
       }
-      return updated
-    })
-  }, [chatKey])
+
+      if (disposed) return
+      setSessions(list)
+
+      let active = localStorage.getItem(ACTIVE_SESSION_KEY(email))
+      if (!active || !list.some((s) => s.id === active)) {
+        active = list[0]?.id
+      }
+      setActiveSessionId(active)
+      localStorage.setItem(ACTIVE_SESSION_KEY(email), active)
+      setMessages(provider.getMessages(email, active))
+    }
+    bootstrap()
+    return () => {
+      disposed = true
+    }
+  }, [email, provider])
+
+  const addMessage = useCallback(
+    (content, role, metadata) => {
+      const msg = {
+        id: crypto.randomUUID(),
+        role,
+        content,
+        ...(metadata ? { metadata } : {}),
+        createdAt: new Date().toISOString(),
+      }
+
+      setMessages((prev) => {
+        const updated = [...prev, msg]
+        const sid = activeSessionIdRef.current
+        if (email && sid) {
+          provider.saveMessages(email, sid, updated)
+        }
+        return updated
+      })
+    },
+    [email, provider]
+  )
 
   const clearMessages = useCallback(() => {
-    sync([])
-    resetChatSession(user?.email)
-  }, [sync, user?.email])
+    setMessages([])
+    const sid = activeSessionIdRef.current
+    if (email && sid) {
+      provider.saveMessages(email, sid, [])
+    }
+    resetChatSession(email)
+  }, [email, provider])
+
+  const createSession = useCallback(
+    (title = "New Chat") => {
+      if (!email) return null
+      const session = provider.createSession(email, title)
+      setSessions((prev) => [session, ...prev])
+      setActiveSessionId(session.id)
+      setMessages([])
+      localStorage.setItem(ACTIVE_SESSION_KEY(email), session.id)
+      return session
+    },
+    [email, provider]
+  )
+
+  const renameSession = useCallback(
+    (id, title) => {
+      if (!email) return
+      provider.renameSession(email, id, title)
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === id ? { ...s, title, updatedAt: new Date().toISOString() } : s
+        )
+      )
+    },
+    [email, provider]
+  )
+
+  const deleteSession = useCallback(
+    (id) => {
+      if (!email) return
+      provider.deleteSession(email, id)
+      const list = provider.getSessions(email)
+      setSessions(list)
+      if (activeSessionIdRef.current === id) {
+        let next = list[0]?.id
+        if (list.length === 0) {
+          const session = provider.createSession(email, "New Chat")
+          setSessions([session])
+          next = session.id
+        }
+        setActiveSessionId(next)
+        setMessages(next ? provider.getMessages(email, next) : [])
+        localStorage.setItem(ACTIVE_SESSION_KEY(email), next)
+      }
+    },
+    [email, provider]
+  )
+
+  const saveMessages = useCallback(
+    (sessionId, msgs) => {
+      if (email) {
+        provider.saveMessages(email, sessionId, msgs)
+      }
+    },
+    [email, provider]
+  )
 
   const sendMessage = useCallback(
     async (content) => {
       if (!content.trim()) return
 
-      trackChatMessage(user?.email)
+      trackChatMessage(email)
 
       const query = content.trim()
       addMessage(query, "user")
@@ -206,8 +308,20 @@ export function useChat() {
         setIsTyping(false)
       }
     },
-    [messages, notes, vaultItems, addMessage, user?.email]
+    [messages, notes, vaultItems, addMessage, email]
   )
 
-  return { messages, addMessage, clearMessages, sendMessage, isTyping }
+  return {
+    sessions,
+    messages,
+    activeSessionId,
+    addMessage,
+    clearMessages,
+    sendMessage,
+    isTyping,
+    createSession,
+    renameSession,
+    deleteSession,
+    saveMessages,
+  }
 }
