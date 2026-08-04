@@ -15,6 +15,16 @@ const NO_KNOWLEDGE_PREFIX =
 
 const ACTIVE_SESSION_KEY = (email) => `studybrain_chat_active_session_${email}`
 
+function byUpdatedAtDesc(list) {
+  return [...list].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+}
+
+function titleFromPrompt(content) {
+  const normalized = String(content || "").replace(/\s+/g, " ").trim()
+  if (normalized.length <= 40) return normalized
+  return `${normalized.slice(0, 37).trimEnd()}...`
+}
+
 function migrateLegacyMessages(email, sessionId, provider) {
   const legacy = localStorage.getItem(`studybrain_chat_${email}`) ?? localStorage.getItem("studybrain_chat")
   let messages = []
@@ -48,6 +58,11 @@ export function useChat() {
     activeSessionIdRef.current = activeSessionId
   }, [activeSessionId])
 
+  const sessionsRef = useRef([])
+  useEffect(() => {
+    sessionsRef.current = sessions
+  }, [sessions])
+
   useEffect(() => {
     migrateChatSessions(email)
   }, [email])
@@ -70,7 +85,7 @@ export function useChat() {
       }
 
       if (disposed) return
-      setSessions(list)
+      setSessions(byUpdatedAtDesc(list))
 
       let active = localStorage.getItem(ACTIVE_SESSION_KEY(email))
       if (!active || !list.some((s) => s.id === active)) {
@@ -132,11 +147,35 @@ export function useChat() {
 
   const renameSession = useCallback(
     (id, title) => {
-      if (!email) return
+      if (!email || !id) return
+      const trimmed = String(title ?? "").trim()
+      if (!trimmed) return
+      provider.renameSession(email, id, trimmed)
+      setSessions((prev) =>
+        byUpdatedAtDesc(
+          prev.map((s) =>
+            s.id === id
+              ? { ...s, title: trimmed, updatedAt: new Date().toISOString() }
+              : s
+          )
+        )
+      )
+    },
+    [email, provider]
+  )
+
+  const bumpSessionActivity = useCallback(
+    (id, query) => {
+      if (!email || !id) return
+      const s = sessionsRef.current.find((x) => x.id === id)
+      if (!s) return
+      const now = new Date().toISOString()
+      const shouldAutoTitle = s.title === "New Chat"
+      const title = shouldAutoTitle ? titleFromPrompt(query) : s.title
       provider.renameSession(email, id, title)
       setSessions((prev) =>
-        prev.map((s) =>
-          s.id === id ? { ...s, title, updatedAt: new Date().toISOString() } : s
+        byUpdatedAtDesc(
+          prev.map((x) => (x.id === id ? { ...x, title, updatedAt: now } : x))
         )
       )
     },
@@ -147,7 +186,7 @@ export function useChat() {
     (id) => {
       if (!email) return
       provider.deleteSession(email, id)
-      const list = provider.getSessions(email)
+      const list = byUpdatedAtDesc(provider.getSessions(email))
       setSessions(list)
       if (activeSessionIdRef.current === id) {
         let next = list[0]?.id
@@ -160,6 +199,17 @@ export function useChat() {
         setMessages(next ? provider.getMessages(email, next) : [])
         localStorage.setItem(ACTIVE_SESSION_KEY(email), next)
       }
+    },
+    [email, provider]
+  )
+
+  const setActiveSession = useCallback(
+    (id) => {
+      if (!email || !id) return
+      if (id === activeSessionIdRef.current) return
+      localStorage.setItem(ACTIVE_SESSION_KEY(email), id)
+      setActiveSessionId(id)
+      setMessages(provider.getMessages(email, id))
     },
     [email, provider]
   )
@@ -181,6 +231,7 @@ export function useChat() {
 
       const query = content.trim()
       addMessage(query, "user")
+      bumpSessionActivity(activeSessionIdRef.current, query)
       setIsTyping(true)
 
       try {
@@ -308,7 +359,7 @@ export function useChat() {
         setIsTyping(false)
       }
     },
-    [messages, notes, vaultItems, addMessage, email]
+    [messages, notes, vaultItems, addMessage, email, bumpSessionActivity]
   )
 
   return {
@@ -322,6 +373,7 @@ export function useChat() {
     createSession,
     renameSession,
     deleteSession,
+    setActiveSession,
     saveMessages,
   }
 }
