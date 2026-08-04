@@ -99,6 +99,9 @@ function SessionList({
                 <button
                   type="button"
                   onClick={() => onSelect(s.id)}
+                  onDoubleClick={() => {
+                    if (interactive && !collapsed && !editing) beginRename(s)
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Escape") commitRename()
                   }}

@@ -9,7 +9,31 @@
   .markdown-body {
     font-size: 0.9375rem;
     line-height: 1.7;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+  }
+
+  /* ---- Display math: keep wide equations inside the bubble --------
+     break-word above stops mid-word splits; a .katex-display is
+     white-space:nowrap and can be wider than the bubble, so let the
+     equation scroll horizontally instead of spilling over the bubble. */
+  .markdown-body .katex-display {
+    max-width: 100%;
+  }
+
+  .markdown-body .katex-display > .katex {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-block: 0.25rem;
+  }
+
+  .markdown-body .katex-display > .katex::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  .markdown-body .katex-display > .katex::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background-color: hsl(var(--muted-foreground) / 0.35);
   }
 
   /* ---- Tables: soft borders, zebra striping, clean last row ---- */

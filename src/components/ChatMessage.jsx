@@ -50,7 +50,7 @@ export default function ChatMessage({ message }) {
       </Avatar>
 
       <div
-        className={`chat-bubble max-w-[75%] min-w-0 rounded-2xl px-4 py-3 text-[15px] leading-7 [overflow-wrap:anywhere] ${
+        className={`chat-bubble max-w-[75%] min-w-0 rounded-2xl px-4 py-3 text-[15px] leading-7 [overflow-wrap:break-word] ${
           isUser
             ? "bg-primary text-primary-foreground rounded-tr-sm"
             : "bg-accent text-accent-foreground rounded-tl-sm shadow-sm"
