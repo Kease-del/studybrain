@@ -1,9 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from "react"
-import { sendChatMessage, getContentBudgetForMessages } from "@/services/ai"
+import {
+  sendChatMessage,
+  getContentBudgetForMessages,
+  summarizeConversation,
+} from "@/services/ai"
 import { trackChatMessage, resetChatSession, migrateChatSessions } from "@/services/analytics"
 import { retrieveRelevantKnowledge, extractPageRefs } from "@/services/retriever"
 import { splitPageBatches } from "@/services/contextBuilder"
-import { trimHistory } from "@/services/history"
+import { trimHistory, partitionMessagesForSummary } from "@/services/history"
 import { isAskingAboutKnowledge, getKnowledgeDomain } from "@/services/queryIntent"
 import { useAuth } from "./useAuth"
 import { useNotes } from "./useNotes"
@@ -14,6 +18,9 @@ const NO_KNOWLEDGE_PREFIX =
   "I couldn't find anything about that in your saved notes or resources."
 
 const ACTIVE_SESSION_KEY = (email) => `studybrain_chat_active_session_${email}`
+
+const SUMMARY_TRIGGER = 30
+const RECENT_MESSAGES_TO_KEEP = 12
 
 function byUpdatedAtDesc(list) {
   return [...list].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
@@ -51,6 +58,7 @@ export function useChat() {
   const [sessions, setSessions] = useState([])
   const [activeSessionId, setActiveSessionId] = useState(null)
   const [messages, setMessages] = useState([])
+  const [summary, setSummary] = useState("")
   const [isTyping, setIsTyping] = useState(false)
 
   const activeSessionIdRef = useRef(null)
@@ -63,6 +71,9 @@ export function useChat() {
     sessionsRef.current = sessions
   }, [sessions])
 
+  const messagesRef = useRef([])
+  const summaryAttemptedRef = useRef(false)
+
   useEffect(() => {
     migrateChatSessions(email)
   }, [email])
@@ -72,6 +83,8 @@ export function useChat() {
       setSessions([])
       setActiveSessionId(null)
       setMessages([])
+      messagesRef.current = []
+      setSummary("")
       return
     }
     let disposed = false
@@ -94,6 +107,8 @@ export function useChat() {
       setActiveSessionId(active)
       localStorage.setItem(ACTIVE_SESSION_KEY(email), active)
       setMessages(provider.getMessages(email, active))
+      messagesRef.current = provider.getMessages(email, active)
+      setSummary(provider.getSummary(email, active))
     }
     bootstrap()
     return () => {
@@ -113,6 +128,7 @@ export function useChat() {
 
       setMessages((prev) => {
         const updated = [...prev, msg]
+        messagesRef.current = updated
         const sid = activeSessionIdRef.current
         if (email && sid) {
           provider.saveMessages(email, sid, updated)
@@ -125,6 +141,7 @@ export function useChat() {
 
   const clearMessages = useCallback(() => {
     setMessages([])
+    messagesRef.current = []
     const sid = activeSessionIdRef.current
     if (email && sid) {
       provider.saveMessages(email, sid, [])
@@ -139,6 +156,8 @@ export function useChat() {
       setSessions((prev) => [session, ...prev])
       setActiveSessionId(session.id)
       setMessages([])
+      messagesRef.current = []
+      setSummary("")
       localStorage.setItem(ACTIVE_SESSION_KEY(email), session.id)
       return session
     },
@@ -197,6 +216,8 @@ export function useChat() {
         }
         setActiveSessionId(next)
         setMessages(next ? provider.getMessages(email, next) : [])
+        messagesRef.current = next ? provider.getMessages(email, next) : []
+        setSummary(next ? provider.getSummary(email, next) : "")
         localStorage.setItem(ACTIVE_SESSION_KEY(email), next)
       }
     },
@@ -210,6 +231,8 @@ export function useChat() {
       localStorage.setItem(ACTIVE_SESSION_KEY(email), id)
       setActiveSessionId(id)
       setMessages(provider.getMessages(email, id))
+      messagesRef.current = provider.getMessages(email, id)
+      setSummary(provider.getSummary(email, id))
     },
     [email, provider]
   )
@@ -223,6 +246,36 @@ export function useChat() {
     [email, provider]
   )
 
+  const summarizeIfNeeded = useCallback(async () => {
+    const sid = activeSessionIdRef.current
+    if (!email || !sid) return
+    if (summaryAttemptedRef.current) return
+
+    const partition = partitionMessagesForSummary(
+      messagesRef.current,
+      SUMMARY_TRIGGER,
+      RECENT_MESSAGES_TO_KEEP
+    )
+    if (!partition) return
+    const { toSummarize, keep } = partition
+
+    summaryAttemptedRef.current = true
+    const existingSummary = provider.getSummary(email, sid)
+    let text
+    try {
+      text = await summarizeConversation(toSummarize, existingSummary)
+    } catch {
+      return
+    }
+    if (!text || !text.trim()) return
+
+    provider.saveSummary(email, sid, text.trim())
+    provider.saveMessages(email, sid, keep)
+    messagesRef.current = keep
+    setSummary(text.trim())
+    setMessages(keep)
+  }, [email, provider])
+
   const sendMessage = useCallback(
     async (content) => {
       if (!content.trim()) return
@@ -233,6 +286,7 @@ export function useChat() {
       addMessage(query, "user")
       bumpSessionActivity(activeSessionIdRef.current, query)
       setIsTyping(true)
+      summaryAttemptedRef.current = false
 
       try {
         const pageRefs = extractPageRefs(query)
@@ -276,7 +330,13 @@ export function useChat() {
         }
 
         const conversation = [...messages, { role: "user", content: query }]
-        const trimmed = trimHistory(conversation)
+        let trimmed = trimHistory(conversation)
+        if (summary) {
+          trimmed = [
+            { role: "system", content: `Conversation Summary:\n${summary}` },
+            ...trimmed,
+          ]
+        }
         const contentBudget = getContentBudgetForMessages(trimmed)
 
         const knowledge =
@@ -333,6 +393,7 @@ export function useChat() {
             : reply
 
         addMessage(finalContent, "assistant", { sources })
+        await summarizeIfNeeded()
       } catch (err) {
         const msg = err?.message || ""
         const isConfigError =
@@ -359,12 +420,13 @@ export function useChat() {
         setIsTyping(false)
       }
     },
-    [messages, notes, vaultItems, addMessage, email, bumpSessionActivity]
+    [messages, notes, vaultItems, addMessage, email, bumpSessionActivity, summarizeIfNeeded, summary]
   )
 
   return {
     sessions,
     messages,
+    summary,
     activeSessionId,
     addMessage,
     clearMessages,

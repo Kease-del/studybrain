@@ -20,3 +20,22 @@ export function trimHistory(messages) {
 
   return result
 }
+
+/**
+ * Decides whether a conversation should be summarized. When the number of
+ * messages exceeds `trigger`, everything except the newest `recentToKeep`
+ * messages is eligible for summarization. Returns null when the threshold has
+ * not been reached (or when there is nothing to summarize).
+ */
+export function partitionMessagesForSummary(messages, trigger = 30, recentToKeep = 12) {
+  const list = (messages ?? []).filter(
+    (m) => typeof m.content === "string" && m.content.trim().length > 0
+  )
+  if (list.length <= trigger) return null
+  const keepFrom = list.length - recentToKeep
+  if (keepFrom <= 0) return null
+  return {
+    toSummarize: list.slice(0, keepFrom),
+    keep: list.slice(keepFrom),
+  }
+}

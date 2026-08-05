@@ -66,6 +66,9 @@ const PROVIDERS = {
   },
 }
 
+const SUMMARIZATION_INSTRUCTION =
+  "You are summarizing a conversation for future context. Write a concise factual summary. Include important topics, decisions, solved problems, user preferences, and ongoing work. Do not include greetings or filler. Keep the summary under 300 words."
+
 function getContextLimit(provider, model) {
   const key = model || provider.defaultModel
   return MODEL_LIMITS[key] ?? DEFAULT_MODEL_LIMIT
@@ -87,7 +90,7 @@ export function getContentBudgetForMessages(messages) {
   return Math.max(0, totalChars - historyChars - RESERVE_CHARS)
 }
 
-export async function sendChatMessage(messages, knowledge) {
+async function requestChat(messages) {
   if (!AI_API_KEY) {
     throw new Error(
       "No API key configured. Set VITE_AI_API_KEY in your .env file."
@@ -113,22 +116,7 @@ export async function sendChatMessage(messages, knowledge) {
     ...provider.getHeaders(AI_API_KEY),
   }
 
-  const contentBudget = getContentBudgetForMessages(messages)
-
-  const { prompt, sources } = buildKnowledgeContext(
-    knowledge?.notes,
-    knowledge?.vaultItems,
-    knowledge?.matchedChunks,
-    knowledge?.pageChunks,
-    contentBudget,
-    knowledge?.partInfo
-  )
-
-  const enrichedMessages = prompt
-    ? [{ role: "system", content: prompt }, ...messages]
-    : messages
-
-  const body = provider.buildBody(enrichedMessages, model)
+  const body = provider.buildBody(messages, model)
 
   let lastError
 
@@ -170,7 +158,7 @@ export async function sendChatMessage(messages, knowledge) {
         throw new Error("AI returned an empty response.")
       }
 
-      return { content: reply, sources }
+      return reply
     } catch (err) {
       clearTimeout(timer)
       lastError = err
@@ -208,4 +196,46 @@ export async function sendChatMessage(messages, knowledge) {
   }
 
   throw lastError || new Error("AI request failed.")
+}
+
+export async function sendChatMessage(messages, knowledge) {
+  const contentBudget = getContentBudgetForMessages(messages)
+
+  const { prompt, sources } = buildKnowledgeContext(
+    knowledge?.notes,
+    knowledge?.vaultItems,
+    knowledge?.matchedChunks,
+    knowledge?.pageChunks,
+    contentBudget,
+    knowledge?.partInfo
+  )
+
+  const enrichedMessages = prompt
+    ? [{ role: "system", content: prompt }, ...messages]
+    : messages
+
+  const content = await requestChat(enrichedMessages)
+
+  return { content, sources }
+}
+
+export async function summarizeConversation(messages, existingSummary = "") {
+  const conversationText = (messages ?? [])
+    .map((m) => {
+      const speaker = m.role === "assistant" ? "Assistant" : "User"
+      return `${speaker}:\n${m.content}`
+    })
+    .join("\n\n")
+  const existing = existingSummary
+    ? `Existing summary:\n${existingSummary}\n\n`
+    : ""
+
+  const content = await requestChat([
+    { role: "system", content: SUMMARIZATION_INSTRUCTION },
+    {
+      role: "user",
+      content: `${existing}Summarize the following conversation:\n\n${conversationText}`,
+    },
+  ])
+  return content.trim()
 }
