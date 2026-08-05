@@ -46,7 +46,7 @@ const STOP_WORDS = new Set([
   "she", "her", "they", "them", "their",
 ])
 
-const FIELD_WEIGHTS = {
+export const FIELD_WEIGHTS = {
   title: 3,
   filename: 2,
   content: 2,
@@ -91,7 +91,7 @@ export function extractPageRefs(query) {
   }
   return refs
 }
-function tokenise(query) {
+export function tokenise(query) {
   return query
     .toLowerCase()
     .split(/[^\p{L}0-9]+/u)

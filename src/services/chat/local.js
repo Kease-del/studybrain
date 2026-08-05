@@ -3,14 +3,20 @@ const MESSAGES_KEY = (sessionId) => `studybrain_chat_msgs_${sessionId}`
 
 const now = () => new Date().toISOString()
 
+const emailOf = (user) => user?.email
+
 export const localChatProvider = {
-  getSessions(email) {
+  getSessions(user) {
+    const email = emailOf(user)
+    if (!email) return []
     const raw = localStorage.getItem(SESSIONS_KEY(email))
     if (!raw) return []
     return JSON.parse(raw).map((s) => ({ ...s, summary: s.summary ?? "" }))
   },
 
-  createSession(email, title = "New Chat") {
+  createSession(user, title = "New Chat") {
+    const email = emailOf(user)
+    if (!email) return null
     const session = {
       id: crypto.randomUUID(),
       title,
@@ -18,52 +24,58 @@ export const localChatProvider = {
       createdAt: now(),
       updatedAt: now(),
     }
-    const list = this.getSessions(email)
+    const list = this.getSessions(user)
     localStorage.setItem(SESSIONS_KEY(email), JSON.stringify([session, ...list]))
     return session
   },
 
-  getSummary(email, sessionId) {
-    const s = this.getSessions(email).find((x) => x.id === sessionId)
+  getSummary(user, sessionId) {
+    const s = this.getSessions(user).find((x) => x.id === sessionId)
     return s?.summary ?? ""
   },
 
-  saveSummary(email, sessionId, summary) {
+  saveSummary(user, sessionId, summary) {
+    const email = emailOf(user)
+    if (!email) return
     localStorage.setItem(
       SESSIONS_KEY(email),
       JSON.stringify(
-        this.getSessions(email).map((s) =>
+        this.getSessions(user).map((s) =>
           s.id === sessionId ? { ...s, summary } : s
         )
       )
     )
   },
 
-  renameSession(email, id, title) {
+  renameSession(user, id, title) {
+    const email = emailOf(user)
+    if (!email) return
     localStorage.setItem(
       SESSIONS_KEY(email),
       JSON.stringify(
-        this.getSessions(email).map((s) =>
+        this.getSessions(user).map((s) =>
           s.id === id ? { ...s, title, updatedAt: now() } : s
         )
       )
     )
   },
 
-  deleteSession(email, id) {
+  deleteSession(user, id) {
+    const email = emailOf(user)
+    if (!email) return
     localStorage.setItem(
       SESSIONS_KEY(email),
-      JSON.stringify(this.getSessions(email).filter((s) => s.id !== id))
+      JSON.stringify(this.getSessions(user).filter((s) => s.id !== id))
     )
     localStorage.removeItem(MESSAGES_KEY(id))
   },
 
-  getMessages(email, sessionId) {
+  getMessages(user, sessionId) {
     const raw = localStorage.getItem(MESSAGES_KEY(sessionId))
     return raw ? JSON.parse(raw) : []
   },
 
-  saveMessages(email, sessionId, messages) {
+  saveMessages(user, sessionId, messages) {
     localStorage.setItem(MESSAGES_KEY(sessionId), JSON.stringify(messages))
   },
 }

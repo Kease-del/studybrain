@@ -6,13 +6,15 @@ import {
 } from "@/services/ai"
 import { trackChatMessage, resetChatSession, migrateChatSessions } from "@/services/analytics"
 import { retrieveRelevantKnowledge, extractPageRefs } from "@/services/retriever"
+import { retrieveVaultResources, buildVaultResourcesSection } from "@/services/vaultRetrieval"
 import { splitPageBatches } from "@/services/contextBuilder"
 import { trimHistory, partitionMessagesForSummary } from "@/services/history"
 import { isAskingAboutKnowledge, getKnowledgeDomain } from "@/services/queryIntent"
 import { useAuth } from "./useAuth"
 import { useNotes } from "./useNotes"
 import { useVault } from "./useVault"
-import { getChatProvider } from "@/services/chat"
+import { getChatProvider, isSupabaseChat } from "@/services/chat"
+import { migrateLocalChatToSupabase } from "@/services/chat/migrate"
 
 const NO_KNOWLEDGE_PREFIX =
   "I couldn't find anything about that in your saved notes or resources."
@@ -32,7 +34,8 @@ function titleFromPrompt(content) {
   return `${normalized.slice(0, 37).trimEnd()}...`
 }
 
-function migrateLegacyMessages(email, sessionId, provider) {
+function migrateLegacyMessages(user, sessionId, provider) {
+  const email = user?.email
   const legacy = localStorage.getItem(`studybrain_chat_${email}`) ?? localStorage.getItem("studybrain_chat")
   let messages = []
   if (legacy !== null) {
@@ -43,7 +46,11 @@ function migrateLegacyMessages(email, sessionId, provider) {
       messages = []
     }
   }
-  provider.saveMessages(email, sessionId, messages)
+  if (messages.length > 0) {
+    Promise.resolve(provider.saveMessages(user, sessionId, messages)).catch(
+      (err) => console.error("Failed to save legacy messages:", err.message)
+    )
+  }
   localStorage.removeItem(`studybrain_chat_${email}`)
   localStorage.removeItem("studybrain_chat")
 }
@@ -88,33 +95,48 @@ export function useChat() {
       return
     }
     let disposed = false
-    function bootstrap() {
-      let list = provider.getSessions(email)
+    async function bootstrap() {
+      try {
+        if (isSupabaseChat) {
+          await migrateLocalChatToSupabase(user)
+        }
 
-      if (list.length === 0) {
-        const session = provider.createSession(email, "New Chat")
-        migrateLegacyMessages(email, session.id, provider)
-        list = provider.getSessions(email)
+        let list = await provider.getSessions(user)
+
+        if (list.length === 0) {
+          const session = await provider.createSession(user, "New Chat")
+          migrateLegacyMessages(user, session.id, provider)
+          list = await provider.getSessions(user)
+        }
+
+        if (disposed) return
+        setSessions(byUpdatedAtDesc(list))
+
+        let active = localStorage.getItem(ACTIVE_SESSION_KEY(email))
+        if (!active || !list.some((s) => s.id === active)) {
+          active = list[0]?.id
+        }
+        setActiveSessionId(active)
+        localStorage.setItem(ACTIVE_SESSION_KEY(email), active)
+        const msgs = await provider.getMessages(user, active)
+        messagesRef.current = msgs
+        setMessages(msgs)
+        setSummary(await provider.getSummary(user, active))
+      } catch (err) {
+        console.error("Failed to load chat sessions:", err.message)
+        if (disposed) return
+        setSessions([])
+        setActiveSessionId(null)
+        setMessages([])
+        messagesRef.current = []
+        setSummary("")
       }
-
-      if (disposed) return
-      setSessions(byUpdatedAtDesc(list))
-
-      let active = localStorage.getItem(ACTIVE_SESSION_KEY(email))
-      if (!active || !list.some((s) => s.id === active)) {
-        active = list[0]?.id
-      }
-      setActiveSessionId(active)
-      localStorage.setItem(ACTIVE_SESSION_KEY(email), active)
-      setMessages(provider.getMessages(email, active))
-      messagesRef.current = provider.getMessages(email, active)
-      setSummary(provider.getSummary(email, active))
     }
     bootstrap()
     return () => {
       disposed = true
     }
-  }, [email, provider])
+  }, [email, user, provider])
 
   const addMessage = useCallback(
     (content, role, metadata) => {
@@ -130,29 +152,33 @@ export function useChat() {
         const updated = [...prev, msg]
         messagesRef.current = updated
         const sid = activeSessionIdRef.current
-        if (email && sid) {
-          provider.saveMessages(email, sid, updated)
+        if (user && sid) {
+          Promise.resolve(provider.saveMessages(user, sid, updated)).catch(
+            (err) => console.error("Failed to save messages:", err.message)
+          )
         }
         return updated
       })
     },
-    [email, provider]
+    [user, provider]
   )
 
   const clearMessages = useCallback(() => {
     setMessages([])
     messagesRef.current = []
     const sid = activeSessionIdRef.current
-    if (email && sid) {
-      provider.saveMessages(email, sid, [])
+    if (user && sid) {
+      Promise.resolve(provider.saveMessages(user, sid, [])).catch((err) =>
+        console.error("Failed to clear messages:", err.message)
+      )
     }
     resetChatSession(email)
-  }, [email, provider])
+  }, [user, provider, email])
 
   const createSession = useCallback(
-    (title = "New Chat") => {
-      if (!email) return null
-      const session = provider.createSession(email, title)
+    async (title = "New Chat") => {
+      if (!user) return null
+      const session = await provider.createSession(user, title)
       setSessions((prev) => [session, ...prev])
       setActiveSessionId(session.id)
       setMessages([])
@@ -161,15 +187,15 @@ export function useChat() {
       localStorage.setItem(ACTIVE_SESSION_KEY(email), session.id)
       return session
     },
-    [email, provider]
+    [user, provider, email]
   )
 
   const renameSession = useCallback(
-    (id, title) => {
-      if (!email || !id) return
+    async (id, title) => {
+      if (!user || !id) return
       const trimmed = String(title ?? "").trim()
       if (!trimmed) return
-      provider.renameSession(email, id, trimmed)
+      await provider.renameSession(user, id, trimmed)
       setSessions((prev) =>
         byUpdatedAtDesc(
           prev.map((s) =>
@@ -180,70 +206,74 @@ export function useChat() {
         )
       )
     },
-    [email, provider]
+    [user, provider]
   )
 
   const bumpSessionActivity = useCallback(
-    (id, query) => {
-      if (!email || !id) return
+    async (id, query) => {
+      if (!user || !id) return
       const s = sessionsRef.current.find((x) => x.id === id)
       if (!s) return
       const now = new Date().toISOString()
       const shouldAutoTitle = s.title === "New Chat"
       const title = shouldAutoTitle ? titleFromPrompt(query) : s.title
-      provider.renameSession(email, id, title)
+      await provider.renameSession(user, id, title)
       setSessions((prev) =>
         byUpdatedAtDesc(
           prev.map((x) => (x.id === id ? { ...x, title, updatedAt: now } : x))
         )
       )
     },
-    [email, provider]
+    [user, provider]
   )
 
   const deleteSession = useCallback(
-    (id) => {
-      if (!email) return
-      provider.deleteSession(email, id)
-      const list = byUpdatedAtDesc(provider.getSessions(email))
+    async (id) => {
+      if (!user) return
+      await provider.deleteSession(user, id)
+      const list = byUpdatedAtDesc(await provider.getSessions(user))
       setSessions(list)
       if (activeSessionIdRef.current === id) {
         let next = list[0]?.id
         if (list.length === 0) {
-          const session = provider.createSession(email, "New Chat")
+          const session = await provider.createSession(user, "New Chat")
           setSessions([session])
           next = session.id
         }
         setActiveSessionId(next)
-        setMessages(next ? provider.getMessages(email, next) : [])
-        messagesRef.current = next ? provider.getMessages(email, next) : []
-        setSummary(next ? provider.getSummary(email, next) : "")
+        const msgs = next ? await provider.getMessages(user, next) : []
+        messagesRef.current = msgs
+        setMessages(msgs)
+        setSummary(next ? await provider.getSummary(user, next) : "")
         localStorage.setItem(ACTIVE_SESSION_KEY(email), next)
       }
     },
-    [email, provider]
+    [user, provider, email]
   )
 
   const setActiveSession = useCallback(
-    (id) => {
-      if (!email || !id) return
+    async (id) => {
+      if (!user || !id) return
       if (id === activeSessionIdRef.current) return
       localStorage.setItem(ACTIVE_SESSION_KEY(email), id)
       setActiveSessionId(id)
-      setMessages(provider.getMessages(email, id))
-      messagesRef.current = provider.getMessages(email, id)
-      setSummary(provider.getSummary(email, id))
+      const msgs = await provider.getMessages(user, id)
+      messagesRef.current = msgs
+      setMessages(msgs)
+      setSummary(await provider.getSummary(user, id))
     },
-    [email, provider]
+    [user, provider, email]
   )
 
   const saveMessages = useCallback(
     (sessionId, msgs) => {
-      if (email) {
-        provider.saveMessages(email, sessionId, msgs)
+      if (user) {
+        Promise.resolve(provider.saveMessages(user, sessionId, msgs)).catch(
+          (err) => console.error("Failed to save messages:", err.message)
+        )
       }
     },
-    [email, provider]
+    [user, provider]
   )
 
   const summarizeIfNeeded = useCallback(async () => {
@@ -260,7 +290,7 @@ export function useChat() {
     const { toSummarize, keep } = partition
 
     summaryAttemptedRef.current = true
-    const existingSummary = provider.getSummary(email, sid)
+    const existingSummary = await provider.getSummary(user, sid)
     let text
     try {
       text = await summarizeConversation(toSummarize, existingSummary)
@@ -269,12 +299,12 @@ export function useChat() {
     }
     if (!text || !text.trim()) return
 
-    provider.saveSummary(email, sid, text.trim())
-    provider.saveMessages(email, sid, keep)
+    await provider.saveSummary(user, sid, text.trim())
+    await provider.saveMessages(user, sid, keep)
     messagesRef.current = keep
     setSummary(text.trim())
     setMessages(keep)
-  }, [email, provider])
+  }, [email, user, provider])
 
   const sendMessage = useCallback(
     async (content) => {
@@ -339,16 +369,6 @@ export function useChat() {
         }
         const contentBudget = getContentBudgetForMessages(trimmed)
 
-        const knowledge =
-          hasNotes || hasVault
-            ? {
-                notes: hasNotes ? relevantNotes : null,
-                vaultItems: hasVault ? relevantVault : null,
-                matchedChunks: Object.keys(matchedChunksMap).length > 0 ? matchedChunksMap : undefined,
-                pageChunks: Object.keys(pageChunksMap).length > 0 ? pageChunksMap : undefined,
-              }
-            : undefined
-
         let reply
         let sources = { ai: true, vault: false, notes: false }
 
@@ -362,6 +382,32 @@ export function useChat() {
             }
           }
         }
+
+        const vaultResources =
+          asking && domain !== "notes"
+            ? retrieveVaultResources(query, vaultItems)
+            : []
+        const vaultSection = buildVaultResourcesSection(vaultResources)
+        const vaultSectionInjected =
+          Boolean(vaultSection) && pageParts.length === 0
+
+        if (vaultSectionInjected) {
+          trimmed = [
+            { role: "system", content: vaultSection },
+            ...trimmed,
+          ]
+        }
+
+        const knowledge =
+          hasNotes || hasVault
+            ? {
+                notes: hasNotes ? relevantNotes : null,
+                vaultItems:
+                  hasVault && !vaultSectionInjected ? relevantVault : null,
+                matchedChunks: Object.keys(matchedChunksMap).length > 0 ? matchedChunksMap : undefined,
+                pageChunks: Object.keys(pageChunksMap).length > 0 ? pageChunksMap : undefined,
+              }
+            : undefined
 
         if (pageParts.length > 1) {
           const parts = []
@@ -385,6 +431,7 @@ export function useChat() {
           const result = await sendChatMessage(trimmed, knowledge)
           reply = result.content
           sources = result.sources
+          if (vaultSectionInjected) sources.vault = true
         }
 
         const finalContent =
