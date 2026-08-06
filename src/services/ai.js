@@ -5,6 +5,12 @@ const AI_MODEL = import.meta.env?.VITE_AI_MODEL || ""
 const AI_API_KEY = import.meta.env?.VITE_AI_API_KEY || ""
 const AI_BASE_URL = import.meta.env?.VITE_AI_BASE_URL || ""
 
+const EMBEDDING_PROVIDER =
+  import.meta.env?.VITE_EMBEDDING_PROVIDER || AI_PROVIDER
+const EMBEDDING_MODEL = import.meta.env?.VITE_EMBEDDING_MODEL || ""
+const EMBEDDING_API_KEY = import.meta.env?.VITE_EMBEDDING_API_KEY || AI_API_KEY
+const EMBEDDING_BASE_URL = import.meta.env?.VITE_EMBEDDING_BASE_URL || ""
+
 const TIMEOUT_MS = 30000
 const MAX_RETRIES = 2
 
@@ -68,18 +74,20 @@ const PROVIDERS = {
 
 const EMBEDDING_DEFAULTS = {
   openai: "text-embedding-3-small",
-  gemini: "text-embedding-004",
+  gemini: "gemini-embedding-2",
   groq: "text-embedding-3-small",
 }
 
 const EMBEDDING_PROVIDERS = {
   openai: {
+    defaultBaseUrl: "https://api.openai.com/v1",
     getEndpoint: () => "/embeddings",
     getHeaders: (key) => ({ Authorization: `Bearer ${key}` }),
     buildBody: (text, model) => ({ model, input: text }),
     parseResponse: (data) => data.data?.[0]?.embedding ?? [],
   },
   gemini: {
+    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
     getEndpoint: (model) => `/models/${model}:embedContent`,
     getHeaders: () => ({}),
     buildBody: (text) => ({ content: { parts: [{ text }] } }),
@@ -87,6 +95,7 @@ const EMBEDDING_PROVIDERS = {
     getUrl: (baseUrl, endpoint, key) => `${baseUrl}${endpoint}?key=${key}`,
   },
   groq: {
+    defaultBaseUrl: "https://api.groq.com/openai/v1",
     getEndpoint: () => "/embeddings",
     getHeaders: (key) => ({ Authorization: `Bearer ${key}` }),
     buildBody: (text, model) => ({ model, input: text }),
@@ -241,26 +250,36 @@ async function requestChat(messages) {
 }
 
 export async function embedText(text) {
-  if (!AI_API_KEY) {
+  if (!EMBEDDING_API_KEY) {
     throw new Error(
-      "No API key configured. Set VITE_AI_API_KEY in your .env file."
+      "No API key configured. Set VITE_EMBEDDING_API_KEY (or VITE_AI_API_KEY) in your .env file."
     )
   }
 
-  const provider = EMBEDDING_PROVIDERS[AI_PROVIDER]
+  const provider = EMBEDDING_PROVIDERS[EMBEDDING_PROVIDER]
   if (!provider) {
     throw new Error(
-      `No embedding support for AI provider "${AI_PROVIDER}". Use: ${Object.keys(EMBEDDING_PROVIDERS).join(", ")}`
+      `No embedding support for AI provider "${EMBEDDING_PROVIDER}". Use: ${Object.keys(EMBEDDING_PROVIDERS).join(", ")}`
     )
   }
 
-  const model = EMBEDDING_DEFAULTS[AI_PROVIDER]
+  const model = EMBEDDING_MODEL || EMBEDDING_DEFAULTS[EMBEDDING_PROVIDER]
+  const baseUrl = EMBEDDING_BASE_URL || provider.defaultBaseUrl
   const endpoint = provider.getEndpoint(model)
+  const url = provider.getUrl
+    ? provider.getUrl(baseUrl, endpoint, EMBEDDING_API_KEY)
+    : `${baseUrl}${endpoint}`
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...provider.getHeaders(EMBEDDING_API_KEY),
+  }
+
   const body = provider.buildBody(text, model)
 
   const vector = await postWithRetry(
-    providerUrl(PROVIDERS[AI_PROVIDER], endpoint),
-    providerHeaders(provider),
+    url,
+    headers,
     body,
     provider.parseResponse,
     (embedding) => !Array.isArray(embedding) || embedding.length === 0
