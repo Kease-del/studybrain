@@ -6,7 +6,8 @@ import {
 } from "@/services/ai"
 import { trackChatMessage, resetChatSession, migrateChatSessions } from "@/services/analytics"
 import { retrieveRelevantKnowledge, extractPageRefs } from "@/services/retriever"
-import { retrieveVaultResources, buildVaultResourcesSection } from "@/services/vaultRetrieval"
+import { buildVaultResourcesSection } from "@/services/vaultRetrieval"
+import { retrieveVaultResourcesSemantic } from "@/services/semanticVaultRetrieval"
 import { splitPageBatches } from "@/services/contextBuilder"
 import { trimHistory, partitionMessagesForSummary } from "@/services/history"
 import { isAskingAboutKnowledge, getKnowledgeDomain } from "@/services/queryIntent"
@@ -385,7 +386,7 @@ export function useChat() {
 
         const vaultResources =
           asking && domain !== "notes"
-            ? retrieveVaultResources(query, vaultItems)
+            ? await retrieveVaultResourcesSemantic(query, vaultItems)
             : []
         const vaultSection = buildVaultResourcesSection(vaultResources)
         const vaultSectionInjected =
