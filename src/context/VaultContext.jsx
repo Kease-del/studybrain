@@ -1,8 +1,29 @@
 import { createContext, useState, useCallback, useEffect } from "react"
 import { useAuth } from "@/hooks/useAuth"
 import { getVaultProvider } from "@/services/vault"
+import {
+  ensureVaultItemEmbedding,
+  createEmbeddingDefaults,
+} from "@/services/vaultEmbedding"
 
 export const VaultContext = createContext(null)
+
+const postProcessItem = (item) => ({
+  ...createEmbeddingDefaults(),
+  ...item,
+})
+
+function embedInBackground(user, provider, setItems, item) {
+  ensureVaultItemEmbedding(item)
+    .then((embedded) => {
+      if (embedded === item) return
+      setItems((prev) =>
+        prev.map((it) => (it.id === embedded.id ? embedded : it))
+      )
+      return provider.updateItem(user, embedded)
+    })
+    .catch((err) => console.error("Vault embedding unavailable:", err.message))
+}
 
 export function VaultProvider({ children }) {
   const { user } = useAuth()
@@ -15,7 +36,7 @@ export function VaultProvider({ children }) {
     if (!user) return
     try {
       const stored = await provider.fetchItems(user)
-      setItems(stored)
+      setItems(stored.map(postProcessItem))
       setError(null)
     } catch (err) {
       console.error("Failed to reload vault:", err.message)
@@ -30,7 +51,7 @@ export function VaultProvider({ children }) {
       try {
         const stored = user ? await provider.fetchItems(user) : []
         if (!active) return
-        setItems(stored)
+        setItems(stored.map(postProcessItem))
         setError(null)
       } catch (err) {
         if (!active) return
@@ -52,17 +73,18 @@ export function VaultProvider({ children }) {
   const addItem = useCallback(
     async (data) => {
       if (!user) return
-      const newItem = {
+      const newItem = postProcessItem({
         id: crypto.randomUUID(),
         tags: [],
         pinned: false,
         ...data,
         createdAt: new Date().toISOString(),
-      }
+      })
       setItems((prev) => [newItem, ...prev])
       try {
         await provider.addItem(user, newItem)
         setError(null)
+        embedInBackground(user, provider, setItems, newItem)
       } catch (err) {
         setItems((prev) => prev.filter((item) => item.id !== newItem.id))
         await reload()
@@ -99,6 +121,7 @@ export function VaultProvider({ children }) {
       try {
         await provider.updateItem(user, updated)
         setError(null)
+        embedInBackground(user, provider, setItems, updated)
       } catch (err) {
         await reload()
         setError(err.message)
@@ -119,6 +142,7 @@ export function VaultProvider({ children }) {
       try {
         await provider.updateItem(user, updated)
         setError(null)
+        embedInBackground(user, provider, setItems, updated)
       } catch (err) {
         await reload()
         setError(err.message)

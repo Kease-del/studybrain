@@ -25,6 +25,8 @@ const mapRow = (row) => ({
   tags: row.tags ?? [],
   pinned: row.pinned ?? false,
   storagePath: row.storage_path ?? undefined,
+  embedding: row.embedding ?? undefined,
+  embeddingSourceHash: row.embedding_source_hash ?? undefined,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -36,7 +38,7 @@ export const supabaseVaultProvider = {
     const { data, error } = await supabase
       .from(TABLE)
       .select(
-        "id, type, title, url, filename, file_size, content, chunks, tags, pinned, storage_path, created_at, updated_at"
+        "id, type, title, url, filename, file_size, content, chunks, tags, pinned, storage_path, embedding, embedding_source_hash, created_at, updated_at"
       )
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
@@ -60,6 +62,8 @@ export const supabaseVaultProvider = {
       tags: item.tags ?? [],
       pinned: item.pinned ?? false,
       storage_path: item.storagePath ?? null,
+      embedding: item.embedding ?? null,
+      embedding_source_hash: item.embeddingSourceHash ?? null,
       created_at: item.createdAt,
       updated_at: item.createdAt,
     })
@@ -79,6 +83,8 @@ export const supabaseVaultProvider = {
       chunks: item.chunks ?? [],
       tags: item.tags ?? [],
       pinned: item.pinned ?? false,
+      embedding: item.embedding ?? null,
+      embedding_source_hash: item.embeddingSourceHash ?? null,
       updated_at: new Date().toISOString(),
     }
     if (item.storagePath !== undefined) {

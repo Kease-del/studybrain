@@ -39,6 +39,53 @@ create index if not exists chat_messages_created_at_idx
   on public.chat_messages (created_at);
 
 -- ─────────────────────────────────────────────────────────────
+-- StudyBrain Vault tables
+-- ─────────────────────────────────────────────────────────────
+
+-- Vault items (one row per saved resource).
+create table if not exists public.vault_items (
+  id uuid primary key,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  type text not null,
+  title text not null default '',
+  url text,
+  filename text,
+  file_size bigint,
+  content text,
+  chunks jsonb not null default '[]'::jsonb,
+  tags jsonb not null default '[]'::jsonb,
+  pinned boolean not null default false,
+  storage_path text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Embedding support (Phase 6D.1): lazily populated vector of the
+-- resource's embeddable source. Existing tables get the columns
+-- added idempotently.
+alter table public.vault_items
+  add column if not exists embedding jsonb,
+  add column if not exists embedding_source_hash text;
+
+create index if not exists vault_items_user_id_idx
+  on public.vault_items (user_id);
+create index if not exists vault_items_updated_at_idx
+  on public.vault_items (updated_at);
+
+-- Row Level Security
+alter table public.vault_items enable row level security;
+
+-- A user can only see/manage their own vault items.
+create policy "vault_items_select_own" on public.vault_items
+  for select using (auth.uid() = user_id);
+create policy "vault_items_insert_own" on public.vault_items
+  for insert with check (auth.uid() = user_id);
+create policy "vault_items_update_own" on public.vault_items
+  for update using (auth.uid() = user_id);
+create policy "vault_items_delete_own" on public.vault_items
+  for delete using (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────
 -- Row Level Security
 -- ─────────────────────────────────────────────────────────────
 
