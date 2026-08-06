@@ -385,7 +385,7 @@ export function useChat() {
         }
 
         const vaultResources =
-          asking && domain !== "notes"
+          domain !== "notes"
             ? await retrieveVaultResourcesSemantic(query, vaultItems)
             : []
         const vaultSection = buildVaultResourcesSection(vaultResources)

@@ -2,11 +2,21 @@ import { embedText } from "./ai.js"
 import { cosineSimilarity } from "./cosineSimilarity.js"
 import { retrieveVaultResources } from "./vaultRetrieval.js"
 
-export const DEFAULT_MIN_SIMILARITY = 0.3
+export const DEFAULT_MIN_SIMILARITY = 0.6
 export const DEFAULT_MAX_RESULTS = 5
+export const MIN_KEYWORD_SCORE = 6
 
 const hasEmbedding = (item) =>
   Array.isArray(item?.embedding) && item.embedding.length > 0
+
+const isMeaningfulKeywordMatch = (result) => {
+  const fields = result.matchedFields ?? []
+  if (fields.includes("title") || fields.includes("tags")) return true
+  return result.score >= MIN_KEYWORD_SCORE
+}
+
+const meaningfulKeywordResults = (query, vaultItems) =>
+  retrieveVaultResources(query, vaultItems).filter(isMeaningfulKeywordMatch)
 
 export async function retrieveVaultResourcesSemantic(
   query,
@@ -24,11 +34,11 @@ export async function retrieveVaultResourcesSemantic(
   try {
     queryVector = await embed(query.trim())
   } catch {
-    return retrieveVaultResources(query, vaultItems)
+    return meaningfulKeywordResults(query, vaultItems)
   }
 
   if (!Array.isArray(queryVector) || queryVector.length === 0) {
-    return retrieveVaultResources(query, vaultItems)
+    return meaningfulKeywordResults(query, vaultItems)
   }
 
   const matches = []
@@ -40,7 +50,7 @@ export async function retrieveVaultResourcesSemantic(
   }
 
   if (matches.length === 0) {
-    return retrieveVaultResources(query, vaultItems)
+    return meaningfulKeywordResults(query, vaultItems)
   }
 
   matches.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))

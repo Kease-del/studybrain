@@ -4,6 +4,7 @@ import {
   retrieveVaultResourcesSemantic,
   DEFAULT_MIN_SIMILARITY,
   DEFAULT_MAX_RESULTS,
+  MIN_KEYWORD_SCORE,
 } from "./semanticVaultRetrieval.js"
 
 function makeItem(id, overrides = {}) {
@@ -164,6 +165,66 @@ describe("retrieveVaultResourcesSemantic", () => {
     assert.equal(result.length, 1)
     assert.equal(result[0].id, "vault-1")
     assert.ok(result[0].matchedFields.includes("tags"))
+  })
+
+  it("keyword fallback drops weak body-only matches below the score floor", async () => {
+    const items = [
+      makeItem("pdf-1", {
+        title: "gst212",
+        tags: ["philosophy"],
+        content:
+          "Long philosophy pack that happens to mention the world and who across thousands of characters.",
+        embedding: [0.1, 0.9, 0],
+      }),
+    ]
+    const result = await retrieveVaultResourcesSemantic(
+      "Who won the 2018 FIFA World Cup?",
+      items,
+      { embed: identityEmbed, minSimilarity: 0.9 }
+    )
+    assert.deepEqual(result, [])
+  })
+
+  it("keyword fallback keeps title/tag matches regardless of body score", async () => {
+    const items = [
+      makeItem("vault-1", {
+        title: "World Cup notes",
+        tags: ["football", "fifa"],
+        content: "France won the 2018 final.",
+        embedding: [0.1, 0.9, 0],
+      }),
+    ]
+    const result = await retrieveVaultResourcesSemantic(
+      "Who won the 2018 FIFA World Cup?",
+      items,
+      { embed: identityEmbed, minSimilarity: 0.9 }
+    )
+    assert.equal(result.length, 1)
+    assert.equal(result[0].id, "vault-1")
+  })
+
+  it("keyword fallback keeps body matches that meet the score floor", async () => {
+    const items = [
+      makeItem("vault-1", {
+        title: "Study notes",
+        tags: [],
+        content:
+          "Mitochondria generate ATP through cellular respiration in binary search fashion.",
+        embedding: [0.1, 0.9, 0],
+      }),
+    ]
+    const result = await retrieveVaultResourcesSemantic(
+      "mitochondria binary search respiration",
+      items,
+      { embed: identityEmbed, minSimilarity: 0.9 }
+    )
+    assert.ok(result.length >= 1)
+    assert.equal(result[0].id, "vault-1")
+  })
+
+  it("exposes a meaningful keyword score constant", () => {
+    assert.equal(typeof MIN_KEYWORD_SCORE, "number")
+    assert.ok(MIN_KEYWORD_SCORE > 0)
   })
 
   it("returns [] for an empty or missing query", async () => {
