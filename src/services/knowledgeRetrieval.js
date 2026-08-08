@@ -1,8 +1,17 @@
 import { embedText } from "./ai.js"
+import { tokenise } from "./retriever.js"
 import { retrieveNotesSemantic } from "./semanticNotesRetrieval.js"
 import { retrieveVaultResourcesSemantic } from "./semanticVaultRetrieval.js"
 
 const MAX_SECTION_CHARS = 1500
+
+// Ranked results are ordered by a composite `relevance` score. Semantic
+// similarity is the primary signal; keyword/title/tag evidence only nudges
+// ordering. Keyword-only fallback results are capped below the semantic
+// threshold so they can never outrank an actual semantic match.
+const SEMANTIC_BOOST_MAX = 0.1
+const KEYWORD_RESULT_CEILING = 0.59
+const EVIDENCE_CAP = 12
 
 function truncate(text, max) {
   if (!text) return ""
@@ -55,6 +64,101 @@ export function mergeSemanticResults(noteResults, vaultResults) {
   }
 
   return merged.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+}
+
+/**
+ * The searchable fields used to derive keyword/title/tag evidence for a
+ * merged result. Weights mirror the keyword retrievers so evidence is
+ * consistent across note and vault sources.
+ *
+ * @param {object} item
+ * @param {"note"|"vault"} type
+ * @returns {Array<{ field: string, weight: number, value: string }>}
+ */
+function fieldEvidence(item, type) {
+  if (type === "note") {
+    return [
+      { field: "title", weight: 3, value: item?.title },
+      { field: "text", weight: 1, value: item?.text },
+    ]
+  }
+  return [
+    { field: "title", weight: 3, value: item?.title },
+    { field: "tags", weight: 3, value: Array.isArray(item?.tags) ? item.tags.join(" ") : "" },
+    { field: "filename", weight: 2, value: item?.filename },
+    {
+      field: "content",
+      weight: 2,
+      value: item?.type === "link" ? item?.url : item?.content,
+    },
+  ]
+}
+
+/**
+ * Computes deterministic keyword/title/tag evidence for an item against a
+ * query. Returns a weighted count of distinct matching keywords per field and
+ * the list of matched fields. Semantic results reuse this as a small boost;
+ * keyword-only results are ranked by it directly.
+ *
+ * @param {string} query
+ * @param {object} item
+ * @param {"note"|"vault"} type
+ * @returns {{ evidence: number, fields: string[] }}
+ */
+function computeKeywordEvidence(query, item, type) {
+  const keywords = tokenise(query)
+  if (keywords.length === 0) return { evidence: 0, fields: [] }
+
+  let evidence = 0
+  const fields = []
+  for (const { field, weight, value } of fieldEvidence(item, type)) {
+    const lower = String(value ?? "").toLowerCase()
+    const matching = keywords.filter((kw) => lower.includes(kw))
+    if (matching.length === 0) continue
+    evidence += weight * matching.length
+    fields.push(field)
+  }
+  return { evidence, fields }
+}
+
+/**
+ * Deterministic relevance score for a single merged result.
+ *
+ * Semantic matches keep their cosine similarity as the dominant component and
+ * gain a small capped boost from keyword/title/tag evidence. Keyword-only
+ * (fallback) results are scaled below the semantic threshold, so strong
+ * semantic relevance always outranks a keyword match while keyword evidence
+ * still differentiates between fallback results.
+ *
+ * @param {string} query
+ * @param {{ id: string, type: "note"|"vault", item: object, score: number, matchedFields: string[] }} result
+ * @returns {number}
+ */
+export function computeRelevanceScore(query, result) {
+  const isSemantic = (result?.matchedFields ?? []).includes("semantic")
+  const { evidence } = computeKeywordEvidence(query, result?.item, result?.type)
+  const normalized = Math.min(evidence / EVIDENCE_CAP, 1)
+
+  if (isSemantic) {
+    return (result?.score ?? 0) + normalized * SEMANTIC_BOOST_MAX
+  }
+  return normalized * KEYWORD_RESULT_CEILING
+}
+
+/**
+ * Re-ranks merged note and vault results by a composite relevance score while
+ * preserving the normalized result shape (plus a `relevance` field).
+ *
+ * @param {Array} results
+ * @param {string} query
+ * @returns {Array}
+ */
+export function rankKnowledgeResults(results, query) {
+  const ranked = (results ?? []).map((r) => ({
+    ...r,
+    relevance: computeRelevanceScore(query, r),
+  }))
+  return ranked.sort((a, b) => b.relevance - a.relevance || a.id.localeCompare(b.id))
 }
 
 function noteLabel(note) {
@@ -121,7 +225,7 @@ export function buildRelevantKnowledgeSection(results) {
  * @param {Function} [opts.embed]
  * @param {number} [opts.minSimilarity]
  * @param {number} [opts.maxResults]
- * @returns {Promise<Array<{ id: string, type: "note"|"vault", item: object, score: number, matchedFields: string[] }>>}
+ * @returns {Promise<Array<{ id: string, type: "note"|"vault", item: object, score: number, matchedFields: string[], relevance: number }>>}
  */
 export async function retrieveRelevantKnowledgeSemantic(
   query,
@@ -151,5 +255,5 @@ export async function retrieveRelevantKnowledgeSemantic(
     retrieveVaultResourcesSemantic(query, vaultItems, opts),
   ])
 
-  return mergeSemanticResults(noteResults, vaultResults)
+  return rankKnowledgeResults(mergeSemanticResults(noteResults, vaultResults), query)
 }

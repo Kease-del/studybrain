@@ -4,6 +4,8 @@ import {
   mergeSemanticResults,
   buildRelevantKnowledgeSection,
   retrieveRelevantKnowledgeSemantic,
+  computeRelevanceScore,
+  rankKnowledgeResults,
 } from "./knowledgeRetrieval.js"
 
 function makeNote(id, overrides = {}) {
@@ -251,5 +253,159 @@ describe("retrieveRelevantKnowledgeSemantic", () => {
     })
     assert.equal(result.length, 2)
     assert.ok(calls >= 2, "each retriever invokes the supplied embed")
+  })
+})
+
+describe("unified knowledge ranking", () => {
+  it("ranks a strong semantic match above a weak keyword-only match", async () => {
+    const notes = [
+      makeNote("n1", {
+        title: "Photosynthesis explained",
+        text: "Plants convert sunlight into chemical energy.",
+        embedding: [1, 0, 0],
+      }),
+    ]
+    const vaultItems = [
+      makeVault("v1", {
+        title: "Photosynthesis biology",
+        content: "Light reactions produce ATP.",
+      }),
+    ]
+
+    const result = await retrieveRelevantKnowledgeSemantic("photosynthesis", notes, vaultItems, {
+      embed: identityEmbed,
+      minSimilarity: 0.5,
+    })
+    assert.equal(result.length, 2)
+    assert.equal(result[0].id, "n1")
+    assert.equal(result[0].type, "note")
+    assert.ok(result[0].matchedFields.includes("semantic"))
+    assert.equal(result[1].id, "v1")
+    assert.equal(result[1].type, "vault")
+    assert.ok(result[0].relevance > result[1].relevance)
+  })
+
+  it("lets title and tag matches improve ordering between semantic results", () => {
+    const titleHit = {
+      id: "z",
+      type: "note",
+      item: makeNote("z", { title: "Biology basics", text: "Cell structures" }),
+      score: 0.7,
+      matchedFields: ["semantic"],
+    }
+    const tagHit = {
+      id: "m",
+      type: "vault",
+      item: makeVault("m", { title: "Lecture 3", tags: ["biology"], content: "Long transcript" }),
+      score: 0.7,
+      matchedFields: ["semantic"],
+    }
+    const plain = {
+      id: "a",
+      type: "note",
+      item: makeNote("a", { title: "Untitled rambling", text: "Nothing related" }),
+      score: 0.7,
+      matchedFields: ["semantic"],
+    }
+
+    const ranked = rankKnowledgeResults([plain, tagHit, titleHit], "biology")
+    assert.deepEqual(ranked.map((r) => r.id), ["m", "z", "a"])
+    assert.ok(ranked[0].relevance > ranked[2].relevance)
+    assert.ok(ranked[1].relevance > ranked[2].relevance)
+  })
+
+  it("does not inject keyword matches that fail the semantic threshold", async () => {
+    const notes = [
+      makeNote("n1", {
+        title: "Photosynthesis",
+        text: "Sunlight turns water and CO2 into glucose.",
+        embedding: [1, 0, 0],
+      }),
+      makeNote("n2", {
+        title: "Photosynthesis notes",
+        text: "About chlorophyll and stomata.",
+        embedding: [0.2, 0.8, 0],
+      }),
+    ]
+    const vaultItems = [
+      makeVault("v1", {
+        title: "Photosynthesis textbook",
+        content: "Light-dependent reactions in detail.",
+      }),
+      makeVault("v2", {
+        title: "Cooking guide",
+        content: "How to boil pasta and make tomato sauce.",
+      }),
+    ]
+
+    const result = await retrieveRelevantKnowledgeSemantic("photosynthesis", notes, vaultItems, {
+      embed: identityEmbed,
+      minSimilarity: 0.5,
+    })
+    const ids = result.map((r) => r.id)
+    assert.ok(ids.includes("n1"), "semantic match present")
+    assert.ok(ids.includes("v1"), "keyword fallback present")
+    assert.ok(!ids.includes("n2"), "below-threshold keyword match is not injected")
+    assert.ok(!ids.includes("v2"), "completely unrelated content is excluded")
+    assert.equal(ids[0], "n1")
+  })
+
+  it("merges notes and vault results without duplicates after ranking", () => {
+    const noteResults = [
+      { id: "shared", note: makeNote("shared", { title: "Duplicate concept" }), score: 0.8, matchedFields: ["semantic"] },
+      { id: "shared", note: makeNote("shared", { title: "Duplicate concept" }), score: 0.6, matchedFields: ["semantic"] },
+      { id: "n1", note: makeNote("n1", { title: "Biology", text: "Cells" }), score: 0.7, matchedFields: ["semantic"] },
+    ]
+    const vaultResults = [
+      { id: "shared", item: makeVault("shared", { title: "Biology vault", tags: ["biology"] }), score: 0.9, matchedFields: ["semantic"] },
+      { id: "v1", item: makeVault("v1", { title: "Lecture notes", content: "Transcript" }), score: 0.65, matchedFields: ["semantic"] },
+    ]
+
+    const merged = mergeSemanticResults(noteResults, vaultResults)
+    assert.equal(merged.length, 4)
+
+    const ranked = rankKnowledgeResults(merged, "biology")
+    assert.equal(ranked.length, 4)
+    const keys = ranked.map((r) => `${r.type}:${r.id}`)
+    assert.equal(new Set(keys).size, 4, "no duplicate note/vault keys")
+    assert.deepEqual(keys, ["vault:shared", "note:shared", "note:n1", "vault:v1"])
+  })
+
+  it("keeps keyword-only relevance below any semantic match", () => {
+    const weakSemantic = {
+      id: "s1",
+      type: "note",
+      item: makeNote("s1", { title: "Biology basics", text: "Cells" }),
+      score: 0.6,
+      matchedFields: ["semantic"],
+    }
+    const strongKeyword = {
+      id: "k1",
+      type: "vault",
+      item: makeVault("k1", {
+        title: "Biology biology biology biology",
+        content: "biology biology biology biology biology biology biology biology biology biology",
+        tags: ["biology"],
+      }),
+      score: 9,
+      matchedFields: ["title", "content", "tags"],
+    }
+
+    assert.ok(computeRelevanceScore("biology", weakSemantic) > computeRelevanceScore("biology", strongKeyword))
+    const ranked = rankKnowledgeResults([strongKeyword, weakSemantic], "biology")
+    assert.equal(ranked[0].id, "s1")
+  })
+
+  it("is deterministic for identical inputs", () => {
+    const results = [
+      { id: "n1", type: "note", item: makeNote("n1", { title: "Mitochondria" }), score: 0.8, matchedFields: ["semantic"] },
+      { id: "v1", type: "vault", item: makeVault("v1", { title: "Cooking", content: "Pasta" }), score: 3, matchedFields: ["title"] },
+    ]
+    const a = rankKnowledgeResults(results, "mitochondria")
+    const b = rankKnowledgeResults(results, "mitochondria")
+    assert.deepEqual(
+      a.map((r) => [r.id, r.relevance]),
+      b.map((r) => [r.id, r.relevance])
+    )
   })
 })
