@@ -86,6 +86,45 @@ create policy "vault_items_delete_own" on public.vault_items
   for delete using (auth.uid() = user_id);
 
 -- ─────────────────────────────────────────────────────────────
+-- StudyBrain Notes tables
+-- ─────────────────────────────────────────────────────────────
+
+-- Notes (one row per saved note).
+create table if not exists public.notes (
+  id uuid primary key,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  title text not null default '',
+  content text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Embedding support (Phase 7.1A): lazily populated vector of the
+-- note's embeddable source. Existing tables get the columns added
+-- idempotently.
+alter table public.notes
+  add column if not exists embedding jsonb,
+  add column if not exists embedding_source_hash text;
+
+create index if not exists notes_user_id_idx
+  on public.notes (user_id);
+create index if not exists notes_updated_at_idx
+  on public.notes (updated_at);
+
+-- Row Level Security
+alter table public.notes enable row level security;
+
+-- A user can only see/manage their own notes.
+create policy if not exists "notes_select_own" on public.notes
+  for select using (auth.uid() = user_id);
+create policy if not exists "notes_insert_own" on public.notes
+  for insert with check (auth.uid() = user_id);
+create policy if not exists "notes_update_own" on public.notes
+  for update using (auth.uid() = user_id);
+create policy if not exists "notes_delete_own" on public.notes
+  for delete using (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────────────────────
 -- Row Level Security
 -- ─────────────────────────────────────────────────────────────
 

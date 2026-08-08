@@ -6,8 +6,10 @@ import {
 } from "@/services/ai"
 import { trackChatMessage, resetChatSession, migrateChatSessions } from "@/services/analytics"
 import { retrieveRelevantKnowledge, extractPageRefs } from "@/services/retriever"
-import { buildVaultResourcesSection } from "@/services/vaultRetrieval"
-import { retrieveVaultResourcesSemantic } from "@/services/semanticVaultRetrieval"
+import {
+  retrieveRelevantKnowledgeSemantic,
+  buildRelevantKnowledgeSection,
+} from "@/services/knowledgeRetrieval"
 import { splitPageBatches } from "@/services/contextBuilder"
 import { trimHistory, partitionMessagesForSummary } from "@/services/history"
 import { isAskingAboutKnowledge, getKnowledgeDomain } from "@/services/queryIntent"
@@ -179,6 +181,28 @@ export function useChat() {
   const createSession = useCallback(
     async (title = "New Chat") => {
       if (!user) return null
+      for (const s of sessionsRef.current) {
+        let msgs
+        try {
+          msgs = await provider.getMessages(user, s.id)
+        } catch {
+          continue
+        }
+        if (msgs.length === 0) {
+          if (s.id !== activeSessionIdRef.current) {
+            setActiveSessionId(s.id)
+            localStorage.setItem(ACTIVE_SESSION_KEY(email), s.id)
+            messagesRef.current = []
+            setMessages([])
+            try {
+              setSummary(await provider.getSummary(user, s.id))
+            } catch {
+              setSummary("")
+            }
+          }
+          return s
+        }
+      }
       const session = await provider.createSession(user, title)
       setSessions((prev) => [session, ...prev])
       setActiveSessionId(session.id)
@@ -384,27 +408,31 @@ export function useChat() {
           }
         }
 
-        const vaultResources =
+        const mergedKnowledge =
           domain !== "notes"
-            ? await retrieveVaultResourcesSemantic(query, vaultItems)
+            ? await retrieveRelevantKnowledgeSemantic(query, notes, vaultItems)
             : []
-        const vaultSection = buildVaultResourcesSection(vaultResources)
-        const vaultSectionInjected =
-          Boolean(vaultSection) && pageParts.length === 0
+        const knowledgeSection = buildRelevantKnowledgeSection(mergedKnowledge)
+        const knowledgeSectionInjected =
+          Boolean(knowledgeSection) && pageParts.length === 0
 
-        if (vaultSectionInjected) {
+        if (knowledgeSectionInjected) {
           trimmed = [
-            { role: "system", content: vaultSection },
+            { role: "system", content: knowledgeSection },
             ...trimmed,
           ]
         }
 
+        const hasSectionNotes = mergedKnowledge.some((r) => r.type === "note")
+        const hasSectionVault = mergedKnowledge.some((r) => r.type === "vault")
+
         const knowledge =
           hasNotes || hasVault
             ? {
-                notes: hasNotes ? relevantNotes : null,
+                notes:
+                  hasNotes && !knowledgeSectionInjected ? relevantNotes : null,
                 vaultItems:
-                  hasVault && !vaultSectionInjected ? relevantVault : null,
+                  hasVault && !knowledgeSectionInjected ? relevantVault : null,
                 matchedChunks: Object.keys(matchedChunksMap).length > 0 ? matchedChunksMap : undefined,
                 pageChunks: Object.keys(pageChunksMap).length > 0 ? pageChunksMap : undefined,
               }
@@ -432,7 +460,10 @@ export function useChat() {
           const result = await sendChatMessage(trimmed, knowledge)
           reply = result.content
           sources = result.sources
-          if (vaultSectionInjected) sources.vault = true
+          if (knowledgeSectionInjected) {
+            sources.vault = hasSectionVault
+            sources.notes = hasSectionNotes
+          }
         }
 
         const finalContent =

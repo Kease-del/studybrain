@@ -24,6 +24,8 @@ const mapRow = (row) => ({
   id: row.id,
   title: row.title,
   text: row.content,
+  embedding: row.embedding ?? undefined,
+  embeddingSourceHash: row.embedding_source_hash ?? undefined,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -34,7 +36,9 @@ export const supabaseNotesProvider = {
     const supabase = getSupabase()
     const { data, error } = await supabase
       .from(TABLE)
-      .select("id, title, content, created_at, updated_at")
+      .select(
+        "id, title, content, embedding, embedding_source_hash, created_at, updated_at"
+      )
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
     if (error) throw new Error(error.message)
@@ -49,6 +53,8 @@ export const supabaseNotesProvider = {
       user_id: userId,
       title: deriveTitle(note.text),
       content: note.text,
+      embedding: note.embedding ?? null,
+      embedding_source_hash: note.embeddingSourceHash ?? null,
       created_at: note.createdAt,
       updated_at: note.createdAt,
     })
@@ -63,6 +69,8 @@ export const supabaseNotesProvider = {
       .update({
         title: deriveTitle(note.text),
         content: note.text,
+        embedding: note.embedding ?? null,
+        embedding_source_hash: note.embeddingSourceHash ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", note.id)

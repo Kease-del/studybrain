@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { Search, FileText, Database, Link, File, X } from "lucide-react"
 import { useSearch } from "@/context/SearchContext"
@@ -13,9 +13,9 @@ const CATEGORY_ICONS = {
 }
 
 export default function SearchBar() {
-  const { query, setQuery, results, open, setOpen, closeSearch } = useSearch()
+  const { query, setQuery, results, open, setOpen, closeSearch, inputRef } =
+    useSearch()
   const navigate = useNavigate()
-  const inputRef = useRef(null)
   const containerRef = useRef(null)
   // Drop the "(Ctrl+K)" hint in the placeholder on very small screens
   // (same 480px breakpoint as .hotkey-hint in responsive.css).
@@ -29,22 +29,6 @@ export default function SearchBar() {
     }
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [setOpen])
-
-  useEffect(() => {
-    function handleKeyDown(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-        e.preventDefault()
-        inputRef.current?.focus()
-        setOpen(true)
-      }
-      if (e.key === "Escape") {
-        setOpen(false)
-        inputRef.current?.blur()
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
   }, [setOpen])
 
   function handleSelect(item) {

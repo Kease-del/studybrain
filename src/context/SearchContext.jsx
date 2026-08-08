@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useMemo, useCallback } from "react"
+import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { useNotes } from "@/hooks/useNotes"
 import { useVault } from "@/hooks/useVault"
 
@@ -83,6 +83,7 @@ export function SearchProvider({ children }) {
   const { items: vault } = useVault()
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
+  const inputRef = useRef(null)
 
   const results = useMemo(
     () => searchItems(query, notes, vault),
@@ -94,9 +95,40 @@ export function SearchProvider({ children }) {
     setQuery("")
   }, [])
 
+  const openSearch = useCallback(() => {
+    setOpen(true)
+    inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.code === "KeyK" || e.key === "k" || e.key === "K")
+      ) {
+        e.preventDefault()
+        openSearch()
+      } else if (e.key === "Escape") {
+        setOpen(false)
+        inputRef.current?.blur()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown, true)
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
+  }, [openSearch])
+
   return (
     <SearchContext.Provider
-      value={{ query, setQuery, results, open, setOpen, closeSearch }}
+      value={{
+        query,
+        setQuery,
+        results,
+        open,
+        setOpen,
+        closeSearch,
+        openSearch,
+        inputRef,
+      }}
     >
       {children}
     </SearchContext.Provider>

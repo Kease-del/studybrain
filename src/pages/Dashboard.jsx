@@ -4,7 +4,7 @@ import { useNotes } from "@/hooks/useNotes"
 import { useVault } from "@/hooks/useVault"
 import { useGoals } from "@/hooks/useGoals"
 import { useQuickCapture } from "@/hooks/useQuickCapture"
-import { getChatSessionCount } from "@/services/analytics"
+import { getChatProvider } from "@/services/chat"
 import OnboardingOverlay from "@/components/OnboardingOverlay"
 import { Button } from "@/components/ui/button"
 import EmptyState from "@/components/EmptyState"
@@ -33,11 +33,28 @@ export default function Dashboard() {
   const { openCapture } = useQuickCapture()
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
+  const [chatSessionCount, setChatSessionCount] = useState(0)
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setLoading(false))
     return () => cancelAnimationFrame(raf)
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadChatSessionCount() {
+      try {
+        const sessions = await getChatProvider().getSessions(user)
+        if (!cancelled) setChatSessionCount(sessions.length)
+      } catch {
+        if (!cancelled) setChatSessionCount(0)
+      }
+    }
+    if (user) loadChatSessionCount()
+    return () => {
+      cancelled = true
+    }
+  }, [user])
 
   const totalGoals = goals.length
   const completedGoals = goals.filter((g) => g.completed).length
@@ -64,7 +81,7 @@ export default function Dashboard() {
     },
     {
       label: "Chat sessions",
-      value: getChatSessionCount(user?.email),
+      value: chatSessionCount,
       icon: MessageSquare,
       description: "AI conversations",
     },

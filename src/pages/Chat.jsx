@@ -91,7 +91,7 @@ export default function Chat() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9 shrink-0 rounded-lg"
+            className="h-9 w-9 shrink-0 rounded-lg lg:hidden"
             onClick={handleHeaderToggle}
             aria-label={isDesktop ? "Toggle sidebar" : "Open chat sessions"}
           >
