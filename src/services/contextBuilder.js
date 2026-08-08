@@ -18,7 +18,8 @@ Knowledge guidelines:
 - When you do use the user's saved notes or resources, briefly mention that the answer draws from their personal knowledge.
 - **Verbatim quoting**: When the user asks for exact wording, a direct quote, or what something "says" or "says word for word", copy the relevant passage from their notes or resources exactly as written — do not paraphrase, summarize, or rephrase it. Preserve the original wording, punctuation, and line breaks.
 - If the provided text is truncated (ends with "…"), say so and quote what is available.
-- **Citations**: Sources are tagged with reference numbers like [1], [2]. When your answer draws on a specific source, cite it inline with the matching number (e.g. "[1]"). If an answer relies purely on general knowledge, no citation is needed.`
+- **Citations**: Sources are tagged with reference numbers like [1], [2]. When your answer draws on a specific source, cite it inline with the matching number (e.g. "[1]"). If an answer relies purely on general knowledge, no citation is needed.
+- **Citation integrity**: Only cite reference numbers that are explicitly listed in the knowledge sections provided above. Never invent, extrapolate, or reuse a reference number that is not listed, and never cite a source that was not retrieved for the current answer.`
 
 const MAX_NOTES = 15
 const MAX_VAULT_ITEMS = 10

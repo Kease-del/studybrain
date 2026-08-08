@@ -22,6 +22,7 @@ export default function ChatMessage({ message }) {
   const isUser = message.role === "user"
   const [copied, setCopied] = useState(false)
   const badge = !isUser ? getSourceBadge(message.metadata) : null
+  const citations = !isUser ? message.metadata?.sources?.citations : null
 
   function handleCopy() {
     navigator.clipboard.writeText(message.content).then(() => {
@@ -62,6 +63,23 @@ export default function ChatMessage({ message }) {
           <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
             <span>{badge.icon}</span>
             <span>{badge.label}</span>
+          </div>
+        )}
+
+        {citations && citations.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground/70">
+            {citations.map((c) => (
+              <span
+                key={`${c.ref}:${c.type}:${c.id}`}
+                className="inline-flex items-center gap-1 rounded-md bg-black/5 px-1.5 py-0.5 dark:bg-white/10"
+                title={c.type === "note" ? "Note" : "Vault resource"}
+              >
+                <span>{c.type === "note" ? "📝" : "🗂"}</span>
+                <span>
+                  [{c.ref}] {c.label}
+                </span>
+              </span>
+            ))}
           </div>
         )}
 

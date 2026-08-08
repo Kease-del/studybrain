@@ -418,7 +418,7 @@ export function useChat() {
 
         if (knowledgeSectionInjected) {
           trimmed = [
-            { role: "system", content: knowledgeSection },
+            { role: "system", content: knowledgeSection.section },
             ...trimmed,
           ]
         }
@@ -463,6 +463,9 @@ export function useChat() {
           if (knowledgeSectionInjected) {
             sources.vault = hasSectionVault
             sources.notes = hasSectionNotes
+            sources.citations = knowledgeSection.sources.map(
+              ({ ref, id, type, label }) => ({ ref, id, type, label })
+            )
           }
         }
 

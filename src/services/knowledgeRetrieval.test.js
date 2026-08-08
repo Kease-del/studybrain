@@ -95,15 +95,17 @@ describe("buildRelevantKnowledgeSection", () => {
     assert.equal(buildRelevantKnowledgeSection(undefined), null)
   })
 
-  it("builds a single section with note and resource entries", () => {
+  it("builds a single section with numbered note and resource entries", () => {
     const results = [
       { id: "n1", type: "note", item: makeNote("n1"), score: 0.9, matchedFields: ["semantic"] },
       { id: "v1", type: "vault", item: makeVault("v1"), score: 0.8, matchedFields: ["semantic"] },
     ]
-    const section = buildRelevantKnowledgeSection(results)
+    const { section, sources } = buildRelevantKnowledgeSection(results)
     assert.ok(section.includes("Relevant Knowledge:"))
-    assert.ok(section.includes("1. [Note] Note n1:\nBody of note n1"))
-    assert.ok(section.includes("2. [Resource] Vault v1:\nContent of vault v1"))
+    assert.ok(section.includes("[1] [Note] Note n1:\nBody of note n1"))
+    assert.ok(section.includes("[2] [Resource] Vault v1:\nContent of vault v1"))
+    assert.equal(sources.length, 2)
+    assert.deepEqual(sources.map((s) => s.ref), [1, 2])
   })
 
   it("truncates long content", () => {
@@ -116,35 +118,132 @@ describe("buildRelevantKnowledgeSection", () => {
         matchedFields: ["semantic"],
       },
     ]
-    const section = buildRelevantKnowledgeSection(results)
-    assert.ok(section.length < 3000)
-    assert.ok(section.endsWith("…"))
+    const { section } = buildRelevantKnowledgeSection(results)
+    assert.ok(section.includes("x".repeat(1500) + "…"))
+    assert.ok(section.includes("Relevant Knowledge:"))
   })
 
   it("falls back to filename and url for vault labels", () => {
     const pdfItem = { id: "v1", type: "pdf", filename: "biology.pdf", content: "page text" }
     const linkItem = { id: "v2", type: "link", url: "https://example.com/notes", title: "" }
-    const section = buildRelevantKnowledgeSection([
+    const { section } = buildRelevantKnowledgeSection([
       { id: "v1", type: "vault", item: pdfItem, score: 0.9, matchedFields: ["semantic"] },
       { id: "v2", type: "vault", item: linkItem, score: 0.8, matchedFields: ["semantic"] },
     ])
-    assert.ok(section.includes("1. [Resource] biology.pdf"))
-    assert.ok(section.includes("2. [Resource] https://example.com/notes"))
+    assert.ok(section.includes("[1] [Resource] biology.pdf"))
+    assert.ok(section.includes("[2] [Resource] https://example.com/notes"))
   })
 
   it("uses the url as content for link resources", () => {
     const linkItem = { id: "v1", type: "link", url: "https://example.com/notes", title: "My Link" }
-    const section = buildRelevantKnowledgeSection([
+    const { section } = buildRelevantKnowledgeSection([
       { id: "v1", type: "vault", item: linkItem, score: 0.9, matchedFields: ["semantic"] },
     ])
     assert.ok(section.includes("[Resource] My Link:\nhttps://example.com/notes"))
   })
 
   it("labels notes without a title", () => {
-    const section = buildRelevantKnowledgeSection([
+    const { section } = buildRelevantKnowledgeSection([
       { id: "n1", type: "note", item: { id: "n1", text: "quick capture" }, score: 0.9, matchedFields: ["semantic"] },
     ])
     assert.ok(section.includes("[Note] Untitled note:\nquick capture"))
+  })
+})
+
+describe("knowledge citations", () => {
+  function buildResults() {
+    return [
+      { id: "n1", type: "note", item: makeNote("n1", { title: "Photosynthesis", text: "Sunlight into glucose." }), score: 0.9, matchedFields: ["semantic"] },
+      { id: "v1", type: "vault", item: makeVault("v1", { title: "Merge Sort", content: "Divide and conquer." }), score: 0.8, matchedFields: ["semantic"] },
+    ]
+  }
+
+  it("maps numbered citations to the correct note and vault resources", () => {
+    const { section, sources } = buildRelevantKnowledgeSection(buildResults())
+    assert.equal(sources.length, 2)
+    assert.deepEqual(sources.map((s) => s.ref), [1, 2])
+    assert.deepEqual(sources.map((s) => s.type), ["note", "vault"])
+    assert.deepEqual(sources.map((s) => s.id), ["n1", "v1"])
+    assert.equal(sources[0].label, "Photosynthesis")
+    assert.equal(sources[1].label, "Merge Sort")
+    assert.equal(sources[0].item.id, "n1")
+    assert.equal(sources[1].item.id, "v1")
+    assert.ok(section.includes("[1] [Note] Photosynthesis:\nSunlight into glucose."))
+    assert.ok(section.includes("[2] [Resource] Merge Sort:\nDivide and conquer."))
+    assert.ok(section.includes("\u2500\u2500\u2500 SOURCES \u2500\u2500\u2500"))
+    assert.ok(section.includes("[1] Note: Photosynthesis"))
+    assert.ok(section.includes("[2] Resource: Merge Sort"))
+  })
+
+  it("never cites resources that were not retrieved", () => {
+    const results = buildResults()
+    const { sources, section } = buildRelevantKnowledgeSection(results)
+    const resultIds = new Set(results.map((r) => r.id))
+    for (const s of sources) {
+      assert.ok(resultIds.has(s.id), `citation [${s.ref}] maps to a retrieved resource`)
+    }
+    assert.equal(new Set(sources.map((s) => `${s.type}:${s.id}`)).size, sources.length)
+    assert.match(section, /Only cite sources by the \[n\] numbers listed above/)
+    assert.match(section, /never cite a source that was not retrieved/)
+  })
+
+  it("excludes unrelated resources from citations end-to-end", async () => {
+    const notes = [
+      makeNote("n1", { title: "Photosynthesis", text: "Sunlight to glucose.", embedding: [1, 0, 0] }),
+      makeNote("nX", { title: "Cooking", text: "Boil pasta.", embedding: [0.2, 0.8, 0] }),
+    ]
+    const vaultItems = [
+      makeVault("v1", { title: "Chloroplast", content: "Site of photosynthesis.", embedding: [0.9, 0.1, 0] }),
+      makeVault("vX", { title: "Pasta recipe", content: "Tomato sauce.", embedding: [0.1, 0.9, 0] }),
+    ]
+
+    const result = await retrieveRelevantKnowledgeSemantic("photosynthesis", notes, vaultItems, {
+      embed: identityEmbed,
+      minSimilarity: 0.5,
+    })
+    const { sources } = buildRelevantKnowledgeSection(result)
+    const ids = sources.map((s) => s.id)
+    assert.ok(ids.includes("n1"))
+    assert.ok(ids.includes("v1"))
+    assert.ok(!ids.includes("nX"), "unrelated note never cited")
+    assert.ok(!ids.includes("vX"), "unrelated vault resource never cited")
+  })
+
+  it("supports notes-only results", () => {
+    const results = [
+      { id: "n1", type: "note", item: makeNote("n1", { title: "Only note", text: "note text" }), score: 0.9, matchedFields: ["semantic"] },
+    ]
+    const { section, sources } = buildRelevantKnowledgeSection(results)
+    assert.deepEqual(sources.map((s) => s.type), ["note"])
+    assert.ok(section.includes("[1] [Note] Only note:\nnote text"))
+    assert.ok(!section.includes("[Resource]"))
+  })
+
+  it("supports vault-only results", () => {
+    const results = [
+      { id: "v1", type: "vault", item: makeVault("v1", { title: "Only vault", content: "vault text" }), score: 0.9, matchedFields: ["semantic"] },
+    ]
+    const { section, sources } = buildRelevantKnowledgeSection(results)
+    assert.deepEqual(sources.map((s) => s.type), ["vault"])
+    assert.ok(section.includes("[1] [Resource] Only vault:\nvault text"))
+    assert.ok(!section.includes("[Note]"))
+  })
+
+  it("preserves source mapping for mixed interleaved results", () => {
+    const results = [
+      { id: "vA", type: "vault", item: makeVault("vA", { title: "Binary Search", content: "O(log n)" }), score: 0.95, matchedFields: ["semantic"] },
+      { id: "nA", type: "note", item: makeNote("nA", { title: "Merge sort note", text: "recursive halves" }), score: 0.9, matchedFields: ["semantic"] },
+      { id: "vB", type: "vault", item: makeVault("vB", { title: "Quicksort", content: "pivot and partition" }), score: 0.85, matchedFields: ["semantic"] },
+    ]
+    const { sources, section } = buildRelevantKnowledgeSection(results)
+    assert.equal(sources.length, 3)
+    assert.deepEqual(sources.map((s) => [s.ref, s.type, s.id]), [
+      [1, "vault", "vA"],
+      [2, "note", "nA"],
+      [3, "vault", "vB"],
+    ])
+    assert.ok(section.includes("[2] [Note] Merge sort note:\nrecursive halves"))
+    assert.ok(section.includes("[3] [Resource] Quicksort:\npivot and partition"))
   })
 })
 

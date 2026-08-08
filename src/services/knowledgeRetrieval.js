@@ -186,28 +186,53 @@ function resourceContent(item) {
 
 /**
  * Builds a single "Relevant Knowledge" section from a merged list of note and
- * vault results. Returns null when there is nothing to inject.
+ * vault results. Each entry is tagged with a numbered citation reference
+ * (`[1]`, `[2]`, …) that maps exactly to the retrieved resource it came from.
+ * The returned `sources` array carries that mapping (`ref`, `id`, `type`,
+ * `item`, `label`) so numbered references can be preserved through prompt
+ * construction and surfaced to the user. Returns null when there is nothing to
+ * inject.
  *
  * @param {Array<{ id: string, type: "note"|"vault", item: object, score: number, matchedFields: string[] }>} results
- * @returns {string|null}
+ * @returns {{ section: string, sources: Array<{ ref: number, id: string, type: "note"|"vault", item: object, label: string }> } | null}
  */
 export function buildRelevantKnowledgeSection(results) {
   if (!results || results.length === 0) return null
 
   const lines = ["Relevant Knowledge:"]
+  const sources = []
   for (let i = 0; i < results.length; i++) {
     const r = results[i]
     const item = r.item
     const isNote = r.type === "note"
     const label = isNote ? noteLabel(item) : resourceLabel(item)
     const content = isNote ? noteContent(item) : resourceContent(item)
+    const ref = i + 1
     lines.push(
-      `${i + 1}. [${isNote ? "Note" : "Resource"}] ${label}${
+      `[${ref}] [${isNote ? "Note" : "Resource"}] ${label}${
         content ? `:\n${content}` : ""
       }`
     )
+    sources.push({
+      ref,
+      id: r.id,
+      type: isNote ? "note" : "vault",
+      item,
+      label,
+    })
   }
-  return lines.join("\n")
+
+  const section = [
+    ...lines,
+    "\u2500\u2500\u2500 SOURCES \u2500\u2500\u2500",
+    ...sources.map(
+      (s) =>
+        `[${s.ref}] ${s.type === "note" ? "Note" : "Resource"}: ${s.label}`
+    ),
+    "Only cite sources by the [n] numbers listed above. Never invent reference numbers, and never cite a source that was not retrieved for this answer.",
+  ].join("\n")
+
+  return { section, sources }
 }
 
 /**
