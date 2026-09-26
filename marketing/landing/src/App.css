@@ -239,11 +239,12 @@ button {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  display: grid;
-  place-items: center;
   background: var(--brand);
   color: var(--brand-fg);
   font-weight: 800;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .nav-actions {
@@ -852,16 +853,81 @@ button {
 /* ============================================================
    Footer
    ============================================================ */
-footer {
+.site-footer {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 30px 0 50px;
+  padding: 55px 0 30px;
   border-top: 1px solid var(--footer-border);
+  color: var(--footer-color);
+}
+
+.footer-main {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  /* gap: 60px; */
+  padding-bottom: 45px;
+}
+
+.footer-brand {
+  max-width: 280px;
+}
+
+.footer-brand .brand {
+  color: var(--text);
+}
+
+.footer-brand p {
+  margin: 14px 0 0;
   color: var(--footer-color);
   font-size: 13px;
+  line-height: 1.6;
+}
+
+.footer-links {
+  display: flex;
+  gap: 24px;
+}
+
+.footer-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 150px;
+}
+
+.footer-column h4 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.footer-column a,
+.footer-column button {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--footer-color);
+  font-size: 13px;
+  text-decoration: none;
+  text-align: left;
+}
+
+.footer-column a:hover,
+.footer-column button:hover {
+  color: var(--text);
+}
+
+.footer-bottom {
+  padding-top: 22px;
+  border-top: 1px solid var(--footer-border);
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 12px;
 }
 
 /* ============================================================
@@ -991,11 +1057,24 @@ footer {
     width: 100%;
   }
 
-  footer {
-    align-items: flex-start;
-    gap: 20px;
-    flex-direction: column;
-  }
+  .site-footer {
+  padding: 40px 0 25px;
+}
+
+.footer-main {
+  flex-direction: column;
+  gap: 35px;
+  padding-bottom: 35px;
+}
+
+.footer-links {
+  gap: 24px;
+}
+
+.footer-bottom {
+  flex-direction: column;
+  gap: 8px;
+}
 
   .theme-switcher {
     gap: 1px;

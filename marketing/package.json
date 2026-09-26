@@ -1,0 +1,10 @@
+{
+  "name": "marketing",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix landing run dev",
+    "build": "npm --prefix landing run build",
+    "lint": "npm --prefix landing run lint",
+    "preview": "npm --prefix landing run preview"
+  }
+}

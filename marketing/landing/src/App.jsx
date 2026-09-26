@@ -405,14 +405,45 @@ function App() {
         </div>
       </section>
 
-      <footer>
-        <div className="brand">
-          <div className="brand-mark">
-            <Brain size={16} strokeWidth={2.5} />
+      <footer className="site-footer">
+        <div className="footer-main">
+          <div className="footer-brand">
+            <div className="brand">
+              <div className="brand-mark">
+                <div className="brand-marki"><Brain size={16} strokeWidth={2.5} /></div>                
+              </div>
+              <span>StudyBrain</span>
+            </div>
+            <p>Your AI study workspace with connected context.</p>
           </div>
-          <span>StudyBrain</span>
+
+          <div className="footer-links">
+            <div className="footer-column">
+              <h4>Product</h4>
+              <button onClick={scrollToFeatures}>Features</button>
+              <button onClick={scrollToWaitlist}>Join the waitlist</button>
+            </div>
+
+            <div className="footer-column">
+              <h4>Connect</h4>
+              <a
+                href="https://x.com/StudyBrainDot"
+                target="_blank"
+                rel="noreferrer"
+              >
+                𝕏 @StudyBrainDot
+              </a>
+              <a href="mailto:studybraindot@gmail.com">
+                studybraindot@gmail.com
+              </a>
+            </div>
+          </div>
         </div>
-        <span>Building in public.</span>
+
+        <div className="footer-bottom">
+          <span>© 2026 StudyBrain.</span>
+          <span>Building in public.</span>
+        </div>
       </footer>
     </main>
   )
